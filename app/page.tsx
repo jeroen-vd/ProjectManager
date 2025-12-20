@@ -1,47 +1,27 @@
 "use client";
 
 import { useState } from "react";
-
-const initialForm = {
-  projectNumber: "",
-  projectName: "",
-  contractor: "",
-  endCustomer: "",
-  siteAddress: "",
-};
+import { useRouter } from "next/navigation";
+import { useWizard } from "./wizard/WizardContext";
 
 export default function Home() {
-  const [form, setForm] = useState(initialForm);
-  const [status, setStatus] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const router = useRouter();
+  const { projectInfo, setProjectInfo } = useWizard();
+  const [form, setForm] = useState(projectInfo);
 
-  const handleChange = (field: keyof typeof initialForm, value: string) => {
+  const handleChange = (field: keyof typeof projectInfo, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const isValid = Object.values(form).every((value) => value.trim().length > 0);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setIsSaving(true);
-    setStatus(null);
-
-    try {
-      const response = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-
-      if (!response.ok) {
-        throw new Error("Opslaan mislukt.");
-      }
-
-      setForm(initialForm);
-      setStatus("Project opgeslagen.");
-    } catch (error) {
-      setStatus("Opslaan mislukt. Probeer opnieuw.");
-    } finally {
-      setIsSaving(false);
+    if (!isValid) {
+      return;
     }
+    setProjectInfo(form);
+    router.push("/step-2");
   };
 
   return (
@@ -52,10 +32,10 @@ export default function Home() {
             Project Manager
           </p>
           <h1 className="text-4xl font-semibold leading-tight">
-            Registreer een project.
+            Stap 1 – Projectinformatie
           </h1>
           <p className="text-base text-slate-600">
-            Vul de projectdetails in en sla ze op in de backend.
+            Vul de basisgegevens in om de wizard te starten.
           </p>
         </header>
         <form
@@ -132,16 +112,11 @@ export default function Home() {
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="submit"
-              disabled={isSaving}
+              disabled={!isValid}
               className="h-12 rounded-2xl bg-slate-900 px-8 text-base font-semibold text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {isSaving ? "Opslaan..." : "Opslaan"}
+              Volgende stap
             </button>
-            {status ? (
-              <span className="text-sm font-medium text-slate-600">
-                {status}
-              </span>
-            ) : null}
           </div>
         </form>
       </main>
