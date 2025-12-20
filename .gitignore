@@ -2,6 +2,9 @@
 
 # dependencies
 /node_modules
+
+# local data storage
+/data
 /.pnp
 .pnp.*
 .yarn/*
