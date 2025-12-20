@@ -9,12 +9,151 @@ import {
   type WizardConfig,
 } from "../../src/config/wizardConfig.default";
 
-const genericIcon = (
-  <svg viewBox="0 0 64 64" className="h-9 w-9" aria-hidden="true">
+const iconMap: Record<string, (className: string) => JSX.Element> = {
+  bike: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <circle cx="18" cy="44" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="46" cy="44" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M18 44 L28 28 L38 44 L46 44" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M28 28 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  canopy: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M12 30 H52" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M16 30 L24 18 H40 L48 30" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M20 30 V50 M44 30 V50" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  play: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="14" y="20" width="36" height="28" rx="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M28 26 L40 34 L28 42 Z" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  street: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M20 44 H44" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 44 V26 H40 V44" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 34 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  custom: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <circle cx="32" cy="24" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M20 48 L32 34 L44 48" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  outdoor: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M16 46 L32 22 L48 46" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M22 46 V36 H42 V46" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  interior: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="16" y="18" width="32" height="28" rx="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 34 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 40 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  industrial: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="16" y="26" width="32" height="20" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M16 26 L26 18 L38 26 L48 18" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 46 V36 M32 46 V36 M40 46 V36" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  lighting: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M32 16 V34" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="32" cy="40" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 48 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  art: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M20 44 L32 20 L44 44 Z" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="32" cy="34" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  freestanding: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="20" y="18" width="24" height="30" rx="3" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 48 V56 M40 48 V56" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  wall: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M18 18 V46" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="24" y="24" width="22" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  attached: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="14" y="28" width="24" height="18" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M38 32 H50 V42 H38" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  modular: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="14" y="18" width="16" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="34" y="18" width="16" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="24" y="34" width="16" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  ceiling: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M14 20 H50" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M32 20 V38" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="32" cy="44" r="6" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  inset: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="16" y="18" width="32" height="28" rx="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="22" y="24" width="20" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  frame: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="16" y="18" width="32" height="28" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="22" y="24" width="20" height="16" rx="1" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  integrated: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <circle cx="26" cy="32" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="38" cy="32" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M30 32 H34" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  mobile: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="18" y="22" width="28" height="18" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="24" cy="44" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="40" cy="44" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  structure: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M20 46 L32 18 L44 46" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M26 36 H38" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+};
+
+const genericIcon = (className: string) => (
+  <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
     <rect x="16" y="16" width="32" height="32" rx="8" fill="none" stroke="currentColor" strokeWidth="2" />
     <path d="M22 32 H42" fill="none" stroke="currentColor" strokeWidth="2" />
   </svg>
 );
+
+const renderIcon = (iconKey: string | undefined, className: string) => {
+  const icon = iconKey ? iconMap[iconKey] : undefined;
+  return icon ? icon(className) : genericIcon(className);
+};
 
 export default function StepTwoPage() {
   const router = useRouter();
@@ -174,8 +313,14 @@ export default function StepTwoPage() {
                         className="sr-only"
                         required
                       />
-                      <span className="text-slate-400 group-hover:text-slate-500">
-                        {genericIcon}
+                      <span
+                        className={`${
+                          isSelected
+                            ? "text-slate-200"
+                            : "text-slate-400 group-hover:text-slate-500"
+                        }`}
+                      >
+                        {renderIcon(type.iconKey, "h-9 w-9")}
                       </span>
                       <span className="text-base font-semibold">
                         {type.label}
@@ -223,8 +368,14 @@ export default function StepTwoPage() {
                         className="sr-only"
                         required
                       />
-                      <span className="text-slate-400 group-hover:text-slate-500">
-                        {genericIcon}
+                      <span
+                        className={`${
+                          isSelected
+                            ? "text-slate-200"
+                            : "text-slate-400 group-hover:text-slate-500"
+                        }`}
+                      >
+                        {renderIcon(context.iconKey, "h-8 w-8")}
                       </span>
                       <span className="text-base font-semibold">
                         {context.label}
@@ -266,8 +417,17 @@ export default function StepTwoPage() {
                           className="sr-only"
                           required
                         />
-                        <span className="mr-2 text-slate-400 group-hover:text-slate-500">
-                          {genericIcon}
+                        <span
+                          className={`mr-2 ${
+                            isSelected
+                              ? "text-slate-200"
+                              : "text-slate-400 group-hover:text-slate-500"
+                          }`}
+                        >
+                          {renderIcon(
+                            config.installationIcons[optionId],
+                            "h-5 w-5"
+                          )}
                         </span>
                         {config.installationLabels[optionId] ?? optionId}
                       </label>

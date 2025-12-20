@@ -1,6 +1,14 @@
-import { defaultWizardConfig, WizardConfig } from "../config/wizardConfig.default";
+import { NextResponse } from "next/server";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import {
+  defaultWizardConfig,
+  type WizardConfig,
+} from "@/src/config/wizardConfig.default";
 
-const STORAGE_KEY = "wizardConfig";
+export const runtime = "nodejs";
+
+type PartialConfig = Partial<WizardConfig>;
 
 const buildDefaultContextIconMap = () => {
   const entries = Object.values(defaultWizardConfig.contextsByCategory).flat();
@@ -13,7 +21,7 @@ const buildDefaultContextIconMap = () => {
   return map;
 };
 
-const normalizeConfig = (raw: WizardConfig | null): WizardConfig => {
+const normalizeConfig = (raw: PartialConfig | null): WizardConfig => {
   if (!raw) {
     return defaultWizardConfig;
   }
@@ -70,32 +78,54 @@ const normalizeConfig = (raw: WizardConfig | null): WizardConfig => {
   };
 };
 
-export function loadWizardConfig(): WizardConfig {
-  if (typeof window === "undefined") {
-    return defaultWizardConfig;
+export async function POST(request: Request) {
+  let payload: PartialConfig | null = null;
+  try {
+    payload = (await request.json()) as PartialConfig;
+  } catch {
+    return NextResponse.json(
+      { error: "Ongeldige JSON payload." },
+      { status: 400 }
+    );
   }
+
+  const nextConfig = normalizeConfig(payload);
+  const filePath = path.join(
+    process.cwd(),
+    "src",
+    "config",
+    "wizardConfig.default.ts"
+  );
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return defaultWizardConfig;
+    const file = await fs.readFile(filePath, "utf8");
+    const marker = "export const defaultWizardConfig: WizardConfig =";
+    const markerIndex = file.indexOf(marker);
+    if (markerIndex === -1) {
+      return NextResponse.json(
+        { error: "Kan default template niet vinden om te overschrijven." },
+        { status: 500 }
+      );
     }
-    return normalizeConfig(JSON.parse(raw) as WizardConfig);
-  } catch {
-    return defaultWizardConfig;
+
+    const newContent = `${file.slice(0, markerIndex)}${marker}\n${JSON.stringify(
+      nextConfig,
+      null,
+      2
+    )};\n`;
+
+    await fs.writeFile(filePath, newContent, "utf8");
+  } catch (error) {
+    console.error("Template opslaan mislukt.", error);
+    return NextResponse.json(
+      { error: "Template opslaan mislukt." },
+      { status: 500 }
+    );
   }
+
+  return NextResponse.json({ ok: true });
 }
 
-export function saveWizardConfig(config: WizardConfig) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-}
-
-export function resetWizardConfig() {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.removeItem(STORAGE_KEY);
+export async function GET() {
+  return NextResponse.json(defaultWizardConfig);
 }

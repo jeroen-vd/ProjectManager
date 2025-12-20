@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   loadWizardConfig,
@@ -11,19 +11,166 @@ import {
   type WizardConfig,
 } from "../../../src/config/wizardConfig.default";
 
-type Option = { id: string; label: string };
+type Option = { id: string; label: string; iconKey?: string };
+
+const iconMap: Record<string, (className: string) => JSX.Element> = {
+  bike: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <circle cx="18" cy="44" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="46" cy="44" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M18 44 L28 28 L38 44 L46 44" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M28 28 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  canopy: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M12 30 H52" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M16 30 L24 18 H40 L48 30" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M20 30 V50 M44 30 V50" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  play: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="14" y="20" width="36" height="28" rx="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M28 26 L40 34 L28 42 Z" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  street: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M20 44 H44" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 44 V26 H40 V44" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 34 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  custom: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <circle cx="32" cy="24" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M20 48 L32 34 L44 48" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  outdoor: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M16 46 L32 22 L48 46" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M22 46 V36 H42 V46" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  interior: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="16" y="18" width="32" height="28" rx="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 34 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 40 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  industrial: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="16" y="26" width="32" height="20" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M16 26 L26 18 L38 26 L48 18" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 46 V36 M32 46 V36 M40 46 V36" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  lighting: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M32 16 V34" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="32" cy="40" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 48 H40" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  art: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M20 44 L32 20 L44 44 Z" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="32" cy="34" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  freestanding: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="20" y="18" width="24" height="30" rx="3" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M24 48 V56 M40 48 V56" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  wall: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M18 18 V46" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="24" y="24" width="22" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  attached: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="14" y="28" width="24" height="18" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M38 32 H50 V42 H38" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  modular: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="14" y="18" width="16" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="34" y="18" width="16" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="24" y="34" width="16" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  ceiling: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M14 20 H50" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M32 20 V38" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="32" cy="44" r="6" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  inset: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="16" y="18" width="32" height="28" rx="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="22" y="24" width="20" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  frame: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="16" y="18" width="32" height="28" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <rect x="22" y="24" width="20" height="16" rx="1" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  integrated: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <circle cx="26" cy="32" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="38" cy="32" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M30 32 H34" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  mobile: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <rect x="18" y="22" width="28" height="18" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="24" cy="44" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <circle cx="40" cy="44" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  structure: (className) => (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+      <path d="M20 46 L32 18 L44 46" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M26 36 H38" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+};
+
+const genericIcon = (className: string) => (
+  <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
+    <rect x="16" y="16" width="32" height="32" rx="8" fill="none" stroke="currentColor" strokeWidth="2" />
+    <path d="M22 32 H42" fill="none" stroke="currentColor" strokeWidth="2" />
+  </svg>
+);
+
+const renderIcon = (iconKey: string | undefined, className: string) => {
+  const icon = iconKey ? iconMap[iconKey] : undefined;
+  return icon ? icon(className) : genericIcon(className);
+};
 
 const contextSuggestions: Option[] = [
-  { id: "buitenstructuur", label: "Buitenstructuur" },
-  { id: "interieur-meubels", label: "Interieur & meubels" },
+  { id: "buitenstructuur", label: "Buitenstructuur", iconKey: "outdoor" },
+  { id: "interieur-meubels", label: "Interieur & meubels", iconKey: "interior" },
   {
     id: "stadsmeubilair-publieke-inrichting",
     label: "Stadsmeubilair & publieke inrichting",
+    iconKey: "street",
   },
-  { id: "industriele-constructie", label: "Industriële constructie" },
-  { id: "verlichting", label: "Verlichting" },
+  { id: "industriele-constructie", label: "Industriële constructie" , iconKey: "industrial" },
+  { id: "verlichting", label: "Verlichting", iconKey: "lighting" },
   { id: "bekleding-gevel-element", label: "Bekleding & gevel-element" },
-  { id: "object-speciaal-project", label: "Object / speciaal project" },
+  { id: "object-speciaal-project", label: "Object / speciaal project", iconKey: "art" },
 ];
 
 const installationSuggestions: Option[] = [
@@ -60,9 +207,7 @@ const uniqueId = (base: string, existing: string[]) => {
 
 export default function Step2SetupPage() {
   const router = useRouter();
-  const [config, setConfig] = useState<WizardConfig>(() =>
-    typeof window === "undefined" ? defaultWizardConfig : loadWizardConfig()
-  );
+  const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
   const [selectedCategoryId, setSelectedCategoryId] = useState(
     config.categories[0]?.id ?? ""
   );
@@ -71,6 +216,18 @@ export default function Step2SetupPage() {
   const [contextDraftLabel, setContextDraftLabel] = useState("");
   const [showInstallationDraft, setShowInstallationDraft] = useState(false);
   const [installationDraftLabel, setInstallationDraftLabel] = useState("");
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [isResettingTemplate, setIsResettingTemplate] = useState(false);
+
+  useEffect(() => {
+    const loaded = loadWizardConfig();
+    setConfig(loaded);
+    setSelectedCategoryId((current) =>
+      loaded.categories.some((category) => category.id === current)
+        ? current
+        : loaded.categories[0]?.id || ""
+    );
+  }, []);
 
   const contextsForCategory =
     config.contextsByCategory[selectedCategoryId] ?? [];
@@ -287,20 +444,54 @@ export default function Step2SetupPage() {
     router.push("/step-2");
   };
 
-  const handleResetToDefault = () => {
-    setConfig(defaultWizardConfig);
-    setSelectedCategoryId(defaultWizardConfig.categories[0]?.id ?? "");
-    setSelectedContextId("");
-    setShowContextDraft(false);
-    setContextDraftLabel("");
-    setShowInstallationDraft(false);
-    setInstallationDraftLabel("");
+  const handleResetToDefault = async () => {
+    try {
+      setIsResettingTemplate(true);
+      const response = await fetch("/api/wizard-template");
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const reason = payload?.error || "Resetten mislukt.";
+        alert(reason);
+        return;
+      }
+      const nextConfig = (await response.json()) as WizardConfig;
+      setConfig(nextConfig);
+      saveWizardConfig(nextConfig);
+      setSelectedCategoryId(nextConfig.categories[0]?.id ?? "");
+      setSelectedContextId("");
+      setShowContextDraft(false);
+      setContextDraftLabel("");
+      setShowInstallationDraft(false);
+      setInstallationDraftLabel("");
+    } catch (error) {
+      console.error("Resetten mislukt.", error);
+      alert("Resetten mislukt.");
+    } finally {
+      setIsResettingTemplate(false);
+    }
   };
 
-  const handleOverwriteDefault = () => {
-    console.warn(
-      "Default config is static. Overwriting is not supported without a backend or file write."
-    );
+  const handleOverwriteDefault = async () => {
+    try {
+      setIsSavingTemplate(true);
+      const response = await fetch("/api/wizard-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const reason = payload?.error || "Opslaan mislukt.";
+        alert(reason);
+        return;
+      }
+      alert("Template opgeslagen.");
+    } catch (error) {
+      console.error("Template opslaan mislukt.", error);
+      alert("Template opslaan mislukt.");
+    } finally {
+      setIsSavingTemplate(false);
+    }
   };
 
   return (
@@ -333,13 +524,22 @@ export default function Step2SetupPage() {
               key={category.id}
               type="button"
               onClick={() => handleSelectCategory(category.id)}
-              className={`w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
+              className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
                 selectedCategoryId === category.id
                   ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
                   : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
               }`}
             >
-              {category.label}
+              <span
+                className={`${
+                  selectedCategoryId === category.id
+                    ? "text-slate-200"
+                    : "text-slate-400 group-hover:text-slate-500"
+                }`}
+              >
+                {renderIcon(category.iconKey, "h-5 w-5")}
+              </span>
+              <span>{category.label}</span>
             </button>
           ))}
         </div>
@@ -427,31 +627,43 @@ export default function Step2SetupPage() {
               <span className="text-lg leading-none">+</span>
             </button>
           ) : null}
-          {contextsForCategory.map((context) => (
-            <div
-              key={context.id}
-              className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                selectedContextId === context.id
-                  ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setSelectedContextId(context.id)}
-                className="flex-1 text-left"
+          {contextsForCategory.map((context) => {
+            const isSelected = selectedContextId === context.id;
+            return (
+              <div
+                key={context.id}
+                className={`group flex items-center justify-between rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                  isSelected
+                    ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                }`}
               >
-                {context.label}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRemoveContext(context.id)}
-                className="ml-3 text-xs font-semibold text-slate-400 hover:text-slate-200"
-              >
-                -
-              </button>
-            </div>
-          ))}
+                <button
+                  type="button"
+                  onClick={() => setSelectedContextId(context.id)}
+                  className="flex flex-1 items-center gap-3 text-left"
+                >
+                  <span
+                    className={`${
+                      isSelected
+                        ? "text-slate-200"
+                        : "text-slate-400 group-hover:text-slate-500"
+                    }`}
+                  >
+                    {renderIcon(context.iconKey, "h-5 w-5")}
+                  </span>
+                  <span>{context.label}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveContext(context.id)}
+                  className="ml-3 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                >
+                  -
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -545,21 +757,29 @@ export default function Step2SetupPage() {
                 <span className="text-lg leading-none">+</span>
               </button>
             ) : null}
-            {installationsForContext.map((optionId) => (
-              <div
-                key={optionId}
-                className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700"
-              >
-                <span>{config.installationLabels[optionId] ?? optionId}</span>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveInstallation(optionId)}
-                  className="ml-3 text-xs font-semibold text-slate-400 hover:text-slate-700"
+            {installationsForContext.map((optionId) => {
+              const iconKey = config.installationIcons[optionId];
+              return (
+                <div
+                  key={optionId}
+                  className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700"
                 >
-                  -
-                </button>
-              </div>
-            ))}
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400">
+                      {renderIcon(iconKey, "h-4 w-4")}
+                    </span>
+                    <span>{config.installationLabels[optionId] ?? optionId}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveInstallation(optionId)}
+                    className="ml-3 text-xs font-semibold text-slate-400 hover:text-slate-700"
+                  >
+                    -
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -623,18 +843,20 @@ export default function Step2SetupPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <button
               type="button"
-              className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
               onClick={handleResetToDefault}
+              disabled={isResettingTemplate}
             >
-              Rest template
+              {isResettingTemplate ? "Resetten..." : "Reset template"}
             </button>
             <button
               type="button"
               className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
               onClick={handleOverwriteDefault}
-              title="Default template staat in code en kan niet zonder backend worden overschreven."
+              title="Sla de huidige configuratie op als nieuwe standaard."
+              disabled={isSavingTemplate}
             >
-              Als template opslaan
+              {isSavingTemplate ? "Opslaan..." : "Als template opslaan"}
             </button>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -658,6 +880,9 @@ export default function Step2SetupPage() {
     </div>
   );
 }
+
+
+
 
 
 
