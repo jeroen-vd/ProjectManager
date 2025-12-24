@@ -9,7 +9,13 @@ import {
   type WizardConfig,
 } from "../../src/config/wizardConfig.default";
 
-const materialOptions = ["Staal S235", "Staal S355", "RVS", "Aluminium"];
+const materialOptions = [
+  "Staal S235",
+  "Staal S355",
+  "Corten A",
+  "Inox",
+  "Aluminium",
+];
 
 const finishOptions = [
   "Thermisch verzinkt",
@@ -450,7 +456,7 @@ export default function StepThreePage() {
             type="button"
             disabled={!canContinue}
             className="h-12 rounded-2xl bg-slate-900 px-8 text-base font-semibold text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
-            onClick={() => console.log("Volgende stap", wizardSnapshot)}
+            onClick={() => router.push("/step-4")}
           >
             Volgende stap
           </button>
