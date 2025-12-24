@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import { useWizard } from "../wizard/WizardContext";
 import { loadWizardConfig } from "../../src/lib/wizardConfigStorage";
@@ -9,7 +9,7 @@ import {
   type WizardConfig,
 } from "../../src/config/wizardConfig.default";
 
-const iconMap: Record<string, (className: string) => JSX.Element> = {
+const iconMap: Record<string, (className: string) => ReactElement> = {
   bike: (className) => (
     <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
       <circle cx="18" cy="44" r="10" fill="none" stroke="currentColor" strokeWidth="2" />

@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import {
   loadWizardConfig,
@@ -13,7 +13,7 @@ import {
 
 type Option = { id: string; label: string; iconKey?: string };
 
-const iconMap: Record<string, (className: string) => JSX.Element> = {
+const iconMap: Record<string, (className: string) => ReactElement> = {
   bike: (className) => (
     <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
       <circle cx="18" cy="44" r="10" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -841,6 +841,13 @@ export default function Step2SetupPage() {
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              onClick={() => router.push("/wizard/question-map")}
+            >
+              Vraagdiagram
+            </button>
             <button
               type="button"
               className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
