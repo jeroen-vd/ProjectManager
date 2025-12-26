@@ -33,6 +33,7 @@ export type Condition = {
 export type FlowNode = {
   id: string;
   questionId: string;
+  position?: { x: number; y: number };
 };
 
 export type FlowEdge = {

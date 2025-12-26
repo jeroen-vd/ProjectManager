@@ -25,6 +25,7 @@ export type StepThreeData = {
   ralColor: string;
   glossLevel: string;
   profileTypes: string[];
+  extras: Record<string, AnswerValue>;
   en1090: {
     required: boolean | null;
     excClass: "" | "EXC1" | "EXC2" | "EXC3" | "EXC4";
@@ -32,6 +33,8 @@ export type StepThreeData = {
     note: string;
   };
 };
+
+export type AnswerValue = string | string[] | boolean | number | null;
 
 export type StepFourData = {
   components: {
@@ -109,6 +112,7 @@ const initialStepThree: StepThreeData = {
   ralColor: "RAL 7016",
   glossLevel: "Mat",
   profileTypes: ["Kokerprofielen", "Plaatmateriaal"],
+  extras: {},
   en1090: {
     required: true,
     excClass: "EXC2",
@@ -175,7 +179,12 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setStepThree = (update: Partial<StepThreeData>) => {
-    setStepThreeState((prev) => ({ ...prev, ...update }));
+    setStepThreeState((prev) => ({
+      ...prev,
+      ...update,
+      extras: update.extras ? { ...prev.extras, ...update.extras } : prev.extras,
+      en1090: update.en1090 ? { ...prev.en1090, ...update.en1090 } : prev.en1090,
+    }));
   };
 
   const setStepFour = (update: Partial<StepFourData>) => {

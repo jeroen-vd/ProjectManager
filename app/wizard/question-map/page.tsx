@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { loadWizardConfig } from "../../../src/lib/wizardConfigStorage";
 import {
@@ -100,6 +100,13 @@ export default function QuestionMapPage() {
   const [library, setLibrary] = useState<QuestionLibrary>(
     defaultQuestionLibrary
   );
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const lastSavedRef = useRef<QuestionLibrary | null>(null);
+  const lastManualSaveRef = useRef<QuestionLibrary | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">(
+    "idle"
+  );
+  const [isDirty, setIsDirty] = useState(false);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(
     defaultQuestionLibrary.questions[0]?.id ?? null
   );
@@ -113,6 +120,11 @@ export default function QuestionMapPage() {
     installationId: "",
   });
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "duplicate" | "orphan" | "missing"
+  >("all");
+  const [sortMode, setSortMode] = useState<"usage" | "alpha">("usage");
+  const [activeScopeIndex, setActiveScopeIndex] = useState(0);
   const [edgeDraft, setEdgeDraft] = useState<{
     flowId: string;
     from: string;
@@ -121,6 +133,10 @@ export default function QuestionMapPage() {
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<
+    "question" | "options" | "outputs" | "edge"
+  >("question");
 
   useEffect(() => {
     const loadedConfig = loadWizardConfig();
@@ -141,7 +157,32 @@ export default function QuestionMapPage() {
       contextId: firstContext,
       installationId: firstInstallation,
     });
+    lastSavedRef.current = loadedLibrary;
+    lastManualSaveRef.current = loadedLibrary;
+    setSaveStatus("saved");
+    setIsDirty(false);
+    setHasLoaded(true);
   }, []);
+
+  useEffect(() => {
+    if (!hasLoaded) {
+      return;
+    }
+    if (lastSavedRef.current === library) {
+      setIsDirty(false);
+      setSaveStatus("saved");
+      return;
+    }
+    setIsDirty(true);
+    setSaveStatus("saving");
+    const timeout = setTimeout(() => {
+      saveQuestionLibrary(library);
+      lastSavedRef.current = library;
+      setSaveStatus("saved");
+      setIsDirty(false);
+    }, 250);
+    return () => clearTimeout(timeout);
+  }, [library, hasLoaded]);
 
   const questionMap = useMemo(
     () => new Map(library.questions.map((question) => [question.id, question])),
@@ -205,10 +246,10 @@ export default function QuestionMapPage() {
 
   const filteredQuestions = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) {
-      return library.questions;
-    }
-    return library.questions.filter((question) => {
+    let results = library.questions.filter((question) => {
+      if (!query) {
+        return true;
+      }
       if (question.prompt.toLowerCase().includes(query)) {
         return true;
       }
@@ -219,7 +260,39 @@ export default function QuestionMapPage() {
         tag.toLowerCase().includes(query)
       );
     });
-  }, [library.questions, search]);
+    if (statusFilter === "duplicate") {
+      results = results.filter((question) => duplicatePromptIds.has(question.id));
+    }
+    if (statusFilter === "orphan") {
+      results = results.filter((question) => orphanQuestionIds.has(question.id));
+    }
+    if (statusFilter === "missing") {
+      results = results.filter((question) => missingOutputIds.has(question.id));
+    }
+    const sorted = [...results];
+    if (sortMode === "usage") {
+      sorted.sort((a, b) => {
+        const usageA = usageMap.get(a.id) ?? 0;
+        const usageB = usageMap.get(b.id) ?? 0;
+        if (usageA !== usageB) {
+          return usageB - usageA;
+        }
+        return a.prompt.localeCompare(b.prompt);
+      });
+    } else {
+      sorted.sort((a, b) => a.prompt.localeCompare(b.prompt));
+    }
+    return sorted;
+  }, [
+    library.questions,
+    search,
+    statusFilter,
+    duplicatePromptIds,
+    orphanQuestionIds,
+    missingOutputIds,
+    usageMap,
+    sortMode,
+  ]);
 
   const selectedQuestion = selectedQuestionId
     ? questionMap.get(selectedQuestionId) ?? null
@@ -297,6 +370,19 @@ export default function QuestionMapPage() {
     scope.contextId,
     scope.installationId,
   ]);
+
+  useEffect(() => {
+    if (scopeSlots.length > 0) {
+      setActiveScopeIndex(scopeSlots.length - 1);
+    }
+  }, [
+    scope.categoryId,
+    scope.contextId,
+    scope.installationId,
+    scopeSlots.length,
+  ]);
+
+  const activeSlot = scopeSlots[activeScopeIndex] ?? scopeSlots[0] ?? null;
 
   const createQuestion = () => {
     const existingIds = library.questions.map((question) => question.id);
@@ -515,6 +601,10 @@ export default function QuestionMapPage() {
   const handleSave = () => {
     setIsSaving(true);
     saveQuestionLibrary(library);
+    lastSavedRef.current = library;
+    lastManualSaveRef.current = library;
+    setSaveStatus("saved");
+    setIsDirty(false);
     setIsSaving(false);
   };
 
@@ -522,9 +612,58 @@ export default function QuestionMapPage() {
     setIsResetting(true);
     resetQuestionLibrary();
     setLibrary(defaultQuestionLibrary);
+    lastSavedRef.current = defaultQuestionLibrary;
+    lastManualSaveRef.current = defaultQuestionLibrary;
+    setSaveStatus("saved");
+    setIsDirty(false);
     setSelectedQuestionId(defaultQuestionLibrary.questions[0]?.id ?? null);
     setSelectedEdgeRef(null);
+    setSearch("");
+    setStatusFilter("all");
+    setSortMode("usage");
+    setActiveScopeIndex(0);
+    setDetailsTab("question");
     setIsResetting(false);
+  };
+
+  const handleCancel = () => {
+    const fallback = loadQuestionLibrary();
+    const snapshot = lastManualSaveRef.current ?? fallback;
+    setLibrary(snapshot);
+    lastSavedRef.current = snapshot;
+    lastManualSaveRef.current = snapshot;
+    setSaveStatus("saved");
+    setIsDirty(false);
+    setSelectedQuestionId(snapshot.questions[0]?.id ?? null);
+    setSelectedEdgeRef(null);
+    setSearch("");
+    setStatusFilter("all");
+    setSortMode("usage");
+    setActiveScopeIndex(0);
+    setDetailsTab("question");
+  };
+
+  const handleOverwriteDefault = async () => {
+    try {
+      setIsSavingTemplate(true);
+      const response = await fetch("/api/question-library-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(library),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const reason = payload?.error || "Opslaan mislukt.";
+        alert(reason);
+        return;
+      }
+      alert("Template opgeslagen.");
+    } catch (error) {
+      console.error("Template opslaan mislukt.", error);
+      alert("Template opslaan mislukt.");
+    } finally {
+      setIsSavingTemplate(false);
+    }
   };
 
   const OutputEditor = ({
@@ -654,6 +793,18 @@ export default function QuestionMapPage() {
     (edge) => edge.id === selectedEdgeRef?.edgeId
   );
 
+  useEffect(() => {
+    if (selectedQuestion) {
+      setDetailsTab("question");
+      return;
+    }
+    if (selectedEdge) {
+      setDetailsTab("edge");
+      return;
+    }
+    setDetailsTab("question");
+  }, [selectedQuestion?.id, selectedEdge?.id]);
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e2e8f0_100%)] px-6 py-16 text-slate-900">
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-8">
@@ -668,6 +819,15 @@ export default function QuestionMapPage() {
             Beheer vragen, hergebruik en relaties per route zonder duplicaten.
           </p>
         </header>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => router.push("/wizard/question-map-visual")}
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            Visuele map openen
+          </button>
+        </div>
 
         <section className="rounded-3xl border border-white/60 bg-white/70 p-6 shadow-xl shadow-slate-200 backdrop-blur">
           <div className="space-y-6">
@@ -764,34 +924,46 @@ export default function QuestionMapPage() {
                   </select>
                 </label>
               </div>
-              <div className="mt-4 flex flex-wrap gap-2 text-xs">
-                <span
-                  className={`rounded-full px-3 py-1 font-semibold ${
-                    duplicatePromptGroups.length > 0
-                      ? "bg-rose-100 text-rose-700"
-                      : "bg-emerald-100 text-emerald-700"
-                  }`}
-                >
-                  Duplicaten: {duplicatePromptGroups.length}
-                </span>
-                <span
-                  className={`rounded-full px-3 py-1 font-semibold ${
-                    orphanQuestionIds.size > 0
-                      ? "bg-amber-100 text-amber-700"
-                      : "bg-emerald-100 text-emerald-700"
-                  }`}
-                >
-                  Losse vragen: {orphanQuestionIds.size}
-                </span>
-                <span
-                  className={`rounded-full px-3 py-1 font-semibold ${
-                    missingOutputIds.size > 0
-                      ? "bg-amber-100 text-amber-700"
-                      : "bg-emerald-100 text-emerald-700"
-                  }`}
-                >
-                  Ontbrekende outputs: {missingOutputIds.size}
-                </span>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                Snelle start
+              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    1. Kies vraag
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-700">
+                    Selecteer links een vraag in de bibliotheek.
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Gebruik zoek/filter om sneller te vinden.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    2. Koppel in flow
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-700">
+                    Voeg de vraag toe aan de actieve scope.
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Geen flow? Maak er meteen een aan.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    3. Leg relaties vast
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-700">
+                    Verbind vragen en voeg voorwaarden toe.
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Klik op een relatie om details te bewerken.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -812,75 +984,219 @@ export default function QuestionMapPage() {
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Zoek op tekst, key, tag"
+                  placeholder="Zoek op vraag, concept key of tag"
                   className="h-10 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
                 />
-                <div className="space-y-2">
-                  {filteredQuestions.map((question) => {
-                    const isSelected = question.id === selectedQuestionId;
-                    const usageCount = usageMap.get(question.id) ?? 0;
-                    const isDuplicate = duplicatePromptIds.has(question.id);
-                    const hasMissingOutput = missingOutputIds.has(question.id);
-                    return (
+                <div className="rounded-2xl border border-slate-200 bg-white/80 p-3 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    Filters (klik om te filteren)
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter("all")}
+                      aria-pressed={statusFilter === "all"}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        statusFilter === "all"
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      Alle vragen: {library.questions.length}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter("duplicate")}
+                      aria-pressed={statusFilter === "duplicate"}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        statusFilter === "duplicate"
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : duplicatePromptGroups.length > 0
+                          ? "border-rose-200 bg-rose-100 text-rose-700 hover:border-rose-300 hover:bg-rose-50"
+                          : "border-emerald-200 bg-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50"
+                      }`}
+                    >
+                      Duplicaten: {duplicatePromptGroups.length}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter("orphan")}
+                      aria-pressed={statusFilter === "orphan"}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        statusFilter === "orphan"
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : orphanQuestionIds.size > 0
+                          ? "border-amber-200 bg-amber-100 text-amber-700 hover:border-amber-300 hover:bg-amber-50"
+                          : "border-emerald-200 bg-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50"
+                      }`}
+                    >
+                      Losse vragen: {orphanQuestionIds.size}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter("missing")}
+                      aria-pressed={statusFilter === "missing"}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        statusFilter === "missing"
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : missingOutputIds.size > 0
+                          ? "border-amber-200 bg-amber-100 text-amber-700 hover:border-amber-300 hover:bg-amber-50"
+                          : "border-emerald-200 bg-emerald-100 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50"
+                      }`}
+                    >
+                      Ontbrekende outputs: {missingOutputIds.size}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                  <span>
+                    {filteredQuestions.length} van {library.questions.length} vragen
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-500">
+                      Sorteren
+                      <select
+                        value={sortMode}
+                        onChange={(event) =>
+                          setSortMode(event.target.value as "usage" | "alpha")
+                        }
+                        className="h-8 rounded-xl border border-slate-200 bg-white px-2 text-[11px] text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                      >
+                        <option value="usage">Meest gebruikt</option>
+                        <option value="alpha">A-Z</option>
+                      </select>
+                    </label>
+                    {search || statusFilter !== "all" ? (
                       <button
-                        key={question.id}
                         type="button"
                         onClick={() => {
-                          setSelectedQuestionId(question.id);
-                          setSelectedEdgeRef(null);
+                          setSearch("");
+                          setStatusFilter("all");
                         }}
-                        className={`flex w-full flex-col gap-1 rounded-2xl border px-3 py-3 text-left text-xs font-semibold transition ${
-                          isSelected
-                            ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-                        }`}
+                        className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
                       >
-                        <span className="text-sm font-semibold">
-                          {question.prompt}
-                        </span>
-                        <span
-                          className={`text-[11px] ${
-                            isSelected ? "text-slate-200" : "text-slate-500"
+                        Filters wissen
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {filteredQuestions.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
+                      Geen resultaten. Pas je zoekterm of filter aan.
+                    </div>
+                  ) : (
+                    filteredQuestions.map((question) => {
+                      const isSelected = question.id === selectedQuestionId;
+                      const usageCount = usageMap.get(question.id) ?? 0;
+                      const isDuplicate = duplicatePromptIds.has(question.id);
+                      const hasMissingOutput = missingOutputIds.has(question.id);
+                      return (
+                        <button
+                          key={question.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedQuestionId(question.id);
+                            setSelectedEdgeRef(null);
+                          }}
+                          className={`flex w-full flex-col gap-1 rounded-2xl border px-3 py-3 text-left text-xs font-semibold transition ${
+                            isSelected
+                              ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
                           }`}
                         >
-                          {question.conceptKey} - gebruikt {usageCount}x
-                        </span>
-                        {isDuplicate ? (
+                          <span className="text-sm font-semibold">
+                            {question.prompt}
+                          </span>
                           <span
                             className={`text-[11px] ${
-                              isSelected
-                                ? "text-rose-200"
-                                : "text-rose-600"
+                              isSelected ? "text-slate-200" : "text-slate-500"
                             }`}
                           >
-                            Mogelijke duplicate
+                            {question.conceptKey} - gebruikt {usageCount}x
                           </span>
-                        ) : null}
-                        {hasMissingOutput ? (
-                          <span
-                            className={`text-[11px] ${
-                              isSelected
-                                ? "text-amber-200"
-                                : "text-amber-600"
-                            }`}
-                          >
-                            Geen outputs
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
+                          {isDuplicate ? (
+                            <span
+                              className={`text-[11px] ${
+                                isSelected
+                                  ? "text-rose-200"
+                                  : "text-rose-600"
+                              }`}
+                            >
+                              Mogelijke duplicate
+                            </span>
+                          ) : null}
+                          {hasMissingOutput ? (
+                            <span
+                              className={`text-[11px] ${
+                                isSelected
+                                  ? "text-amber-200"
+                                  : "text-amber-600"
+                              }`}
+                            >
+                              Geen outputs
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               </div>
               <div className="space-y-4 lg:col-span-5">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-                  Flow diagram
+                  Vraagdiagram
                 </h2>
+                <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-xs text-slate-600 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      Actieve scope
+                    </p>
+                    <span className="text-[11px] text-slate-500">
+                      {activeSlot?.label ?? "Onbekend"}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {scopeSlots.map((slot, index) => {
+                      const flowForSlot = library.flows.find((item) =>
+                        matchesScope(item, slot.scope)
+                      );
+                      const isActive = index === activeScopeIndex;
+                      return (
+                        <button
+                          key={`${slot.scope.level}-${slot.label}`}
+                          type="button"
+                          onClick={() => setActiveScopeIndex(index)}
+                          aria-pressed={isActive}
+                          className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                            isActive
+                              ? "border-slate-900 bg-slate-900 text-white"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                        >
+                          <span>{slot.label}</span>
+                          <span
+                            className={`ml-2 text-[10px] ${
+                              isActive ? "text-slate-200" : "text-slate-400"
+                            }`}
+                          >
+                            {flowForSlot
+                              ? `${flowForSlot.nodes.length} vragen`
+                              : "geen flow"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div className="space-y-4">
-                  {scopeSlots.map((slot) => {
+                  {scopeSlots.map((slot, index) => {
                     const flow = library.flows.find((item) =>
                       matchesScope(item, slot.scope)
                     );
+                    if (index !== activeScopeIndex) {
+                      return null;
+                    }
                     if (!flow) {
                       return (
                         <div
@@ -889,16 +1205,17 @@ export default function QuestionMapPage() {
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                                {slot.label}
-                              </p>
-                              <p className="text-sm text-slate-500">
-                                Nog geen flow voor deze scope.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() =>
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                              {slot.label}
+                            </p>
+                            <p className="text-sm text-slate-500">
+                              Nog geen flow voor deze scope. Maak er een om vragen
+                              te koppelen.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
                                 addFlowForScope(slot.scope, slot.label)
                               }
                               className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
@@ -920,7 +1237,7 @@ export default function QuestionMapPage() {
                               {flow.name}
                             </p>
                             <p className="text-sm text-slate-500">
-                              {flow.nodes.length} node(s) - {flow.edges.length} relaties
+                              {flow.nodes.length} vragen - {flow.edges.length} relaties
                             </p>
                           </div>
                           <button
@@ -937,10 +1254,16 @@ export default function QuestionMapPage() {
                             + geselecteerde vraag
                           </button>
                         </div>
+                        {!selectedQuestionId ? (
+                          <p className="mt-2 text-[11px] text-slate-400">
+                            Selecteer links een vraag om toe te voegen.
+                          </p>
+                        ) : null}
                         <div className="mt-4 space-y-2">
                           {flow.nodes.length === 0 ? (
                             <p className="text-sm text-slate-500">
-                              Nog geen vragen gekoppeld.
+                              Nog geen vragen gekoppeld. Selecteer een vraag en
+                              klik op + geselecteerde vraag.
                             </p>
                           ) : null}
                           {flow.nodes.map((node) => {
@@ -1095,7 +1418,7 @@ export default function QuestionMapPage() {
                           <div className="mt-3 space-y-2">
                             {flow.edges.length === 0 ? (
                               <p className="text-sm text-slate-500">
-                                Nog geen relaties.
+                                Nog geen relaties. Gebruik + relatie om te verbinden.
                               </p>
                             ) : null}
                             {flow.edges.map((edge) => {
@@ -1162,204 +1485,275 @@ export default function QuestionMapPage() {
                     <div className="space-y-4">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                          Vraag details
+                          Geselecteerde vraag
                         </p>
-                        <p className="text-sm text-slate-500">
+                        <p className="text-sm text-slate-600">
+                          {selectedQuestion.prompt}
+                        </p>
+                        <p className="text-[11px] text-slate-400">
                           {selectedQuestion.id}
                         </p>
                       </div>
-                      <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                        Concept key
-                        <input
-                          value={selectedQuestion.conceptKey}
-                          onChange={(event) =>
-                            updateQuestion(selectedQuestion.id, {
-                              conceptKey: event.target.value,
-                            })
-                          }
-                          className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                        />
-                      </label>
-                      {library.questions.some(
-                        (question) =>
-                          question.conceptKey === selectedQuestion.conceptKey &&
-                          question.id !== selectedQuestion.id
-                      ) ? (
-                        <p className="text-xs font-semibold text-rose-600">
-                          Concept key bestaat al.
-                        </p>
-                      ) : null}
-                      <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                        Vraagtekst
-                        <textarea
-                          value={selectedQuestion.prompt}
-                          onChange={(event) =>
-                            updateQuestion(selectedQuestion.id, {
-                              prompt: event.target.value,
-                            })
-                          }
-                          rows={3}
-                          className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                        Type
-                        <select
-                          value={selectedQuestion.kind}
-                          onChange={(event) =>
-                            updateQuestion(selectedQuestion.id, {
-                              kind: event.target.value as Question["kind"],
-                            })
-                          }
-                          className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDetailsTab("question")}
+                          aria-pressed={detailsTab === "question"}
+                          className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                            detailsTab === "question"
+                              ? "border-slate-900 bg-slate-900 text-white"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
                         >
-                          <option value="text">Tekst</option>
-                          <option value="number">Nummer</option>
-                          <option value="boolean">Ja/Nee</option>
-                          <option value="single">Single choice</option>
-                          <option value="multi">Multi choice</option>
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                        Tags
-                        <input
-                          value={joinList(selectedQuestion.tags)}
-                          onChange={(event) =>
-                            updateQuestion(selectedQuestion.id, {
-                              tags: splitList(event.target.value),
-                            })
-                          }
-                          placeholder="bijv. materiaal, compliance"
-                          className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                        />
-                      </label>
-
-                      {selectedQuestion.kind === "single" ||
-                      selectedQuestion.kind === "multi" ? (
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                              Opties
+                          Vraag
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDetailsTab("options")}
+                          aria-pressed={detailsTab === "options"}
+                          className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                            detailsTab === "options"
+                              ? "border-slate-900 bg-slate-900 text-white"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                        >
+                          Opties
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDetailsTab("outputs")}
+                          aria-pressed={detailsTab === "outputs"}
+                          className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                            detailsTab === "outputs"
+                              ? "border-slate-900 bg-slate-900 text-white"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                        >
+                          Outputs
+                        </button>
+                      </div>
+                      {detailsTab === "question" ? (
+                        <div className="space-y-4">
+                          <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                            Concept key
+                            <input
+                              value={selectedQuestion.conceptKey}
+                              onChange={(event) =>
+                                updateQuestion(selectedQuestion.id, {
+                                  conceptKey: event.target.value,
+                                })
+                              }
+                              className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                            />
+                          </label>
+                          {library.questions.some(
+                            (question) =>
+                              question.conceptKey === selectedQuestion.conceptKey &&
+                              question.id !== selectedQuestion.id
+                          ) ? (
+                            <p className="text-xs font-semibold text-rose-600">
+                              Concept key bestaat al.
                             </p>
-                            <button
-                              type="button"
-                              onClick={() => addOption(selectedQuestion)}
-                              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                          ) : null}
+                          <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                            Vraagtekst
+                            <textarea
+                              value={selectedQuestion.prompt}
+                              onChange={(event) =>
+                                updateQuestion(selectedQuestion.id, {
+                                  prompt: event.target.value,
+                                })
+                              }
+                              rows={3}
+                              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                            Type
+                            <select
+                              value={selectedQuestion.kind}
+                              onChange={(event) =>
+                                updateQuestion(selectedQuestion.id, {
+                                  kind: event.target.value as Question["kind"],
+                                })
+                              }
+                              className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
                             >
-                              + optie
-                            </button>
-                          </div>
-                          <div className="space-y-3">
-                            {(selectedQuestion.options ?? []).map((option) => (
-                              <div
-                                key={option.id}
-                                className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600"
-                              >
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                  <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
-                                    Label
-                                    <input
-                                      value={option.label}
-                                      onChange={(event) =>
-                                        updateOption(selectedQuestion, option.id, {
-                                          label: event.target.value,
-                                        })
-                                      }
-                                      className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                                    />
-                                  </label>
-                                  <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
-                                    Value
-                                    <input
-                                      value={option.value}
-                                      onChange={(event) =>
-                                        updateOption(selectedQuestion, option.id, {
-                                          value: event.target.value,
-                                        })
-                                      }
-                                      className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                                    />
-                                  </label>
-                                </div>
-                                <details className="mt-3">
-                                  <summary className="cursor-pointer text-xs font-semibold text-slate-500">
-                                    Outputs voor optie
-                                  </summary>
-                                  <div className="mt-3">
-                                    <OutputEditor
-                                      outputs={option.outputs ?? []}
-                                      onChange={(next) =>
-                                        updateOptionOutputs(
-                                          selectedQuestion,
-                                          option.id,
-                                          next
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                </details>
+                              <option value="text">Tekst</option>
+                              <option value="number">Nummer</option>
+                              <option value="boolean">Ja/Nee</option>
+                              <option value="single">Single choice</option>
+                              <option value="multi">Multi choice</option>
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                            Tags
+                            <input
+                              value={joinList(selectedQuestion.tags)}
+                              onChange={(event) =>
+                                updateQuestion(selectedQuestion.id, {
+                                  tags: splitList(event.target.value),
+                                })
+                              }
+                              placeholder="bijv. materiaal, compliance"
+                              className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                            />
+                          </label>
+                          {similarQuestions.length > 0 ? (
+                            <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
+                              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-600">
+                                Vergelijkbare vragen
+                              </p>
+                              <div className="space-y-1">
+                                {similarQuestions.map(({ question, score }) => (
+                                  <button
+                                    key={question.id}
+                                    type="button"
+                                    onClick={() =>
+                                      setSelectedQuestionId(question.id)
+                                    }
+                                    className="block text-left text-xs font-semibold text-amber-800"
+                                  >
+                                    {question.prompt} ({Math.round(score * 100)}%)
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            onClick={() => removeQuestion(selectedQuestion.id)}
+                            disabled={(usageMap.get(selectedQuestion.id) ?? 0) > 0}
+                            className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Vraag verwijderen
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {detailsTab === "options" ? (
+                        <div className="space-y-3">
+                          {selectedQuestion.kind === "single" ||
+                          selectedQuestion.kind === "multi" ? (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                  Opties
+                                </p>
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    removeOption(selectedQuestion, option.id)
-                                  }
-                                  className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
+                                  onClick={() => addOption(selectedQuestion)}
+                                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
                                 >
-                                  Optie verwijderen
+                                  + optie
                                 </button>
                               </div>
-                            ))}
-                          </div>
+                              <div className="space-y-3">
+                                {(selectedQuestion.options ?? []).map((option) => (
+                                  <div
+                                    key={option.id}
+                                    className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600"
+                                  >
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                      <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+                                        Label
+                                        <input
+                                          value={option.label}
+                                          onChange={(event) =>
+                                            updateOption(
+                                              selectedQuestion,
+                                              option.id,
+                                              {
+                                                label: event.target.value,
+                                              }
+                                            )
+                                          }
+                                          className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                                        />
+                                      </label>
+                                      <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+                                        Value
+                                        <input
+                                          value={option.value}
+                                          onChange={(event) =>
+                                            updateOption(
+                                              selectedQuestion,
+                                              option.id,
+                                              {
+                                                value: event.target.value,
+                                              }
+                                            )
+                                          }
+                                          className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                                        />
+                                      </label>
+                                    </div>
+                                    <details className="mt-3">
+                                      <summary className="cursor-pointer text-xs font-semibold text-slate-500">
+                                        Outputs voor optie
+                                      </summary>
+                                      <div className="mt-3">
+                                        <OutputEditor
+                                          outputs={option.outputs ?? []}
+                                          onChange={(next) =>
+                                            updateOptionOutputs(
+                                              selectedQuestion,
+                                              option.id,
+                                              next
+                                            )
+                                          }
+                                        />
+                                      </div>
+                                    </details>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        removeOption(selectedQuestion, option.id)
+                                      }
+                                      className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
+                                    >
+                                      Optie verwijderen
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-500">
+                              Deze vraag heeft geen opties. Kies type Single choice
+                              of Multi choice.
+                            </p>
+                          )}
                         </div>
                       ) : null}
 
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                          Outputs (planning)
-                        </p>
-                        <OutputEditor
-                          outputs={selectedQuestion.outputs ?? []}
-                          onChange={(next) => updateOutputs(selectedQuestion, next)}
-                        />
-                      </div>
-
-                      {similarQuestions.length > 0 ? (
-                        <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-600">
-                            Vergelijkbare vragen
+                      {detailsTab === "outputs" ? (
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                            Outputs (planning)
                           </p>
-                          <div className="space-y-1">
-                            {similarQuestions.map(({ question, score }) => (
-                              <button
-                                key={question.id}
-                                type="button"
-                                onClick={() => setSelectedQuestionId(question.id)}
-                                className="block text-left text-xs font-semibold text-amber-800"
-                              >
-                                {question.prompt} ({Math.round(score * 100)}%)
-                              </button>
-                            ))}
-                          </div>
+                          <p className="text-[11px] text-slate-400">
+                            Outputs sturen de takenlijst in de planning.
+                          </p>
+                          <OutputEditor
+                            outputs={selectedQuestion.outputs ?? []}
+                            onChange={(next) =>
+                              updateOutputs(selectedQuestion, next)
+                            }
+                          />
                         </div>
                       ) : null}
 
-                      <button
-                        type="button"
-                        onClick={() => removeQuestion(selectedQuestion.id)}
-                        disabled={(usageMap.get(selectedQuestion.id) ?? 0) > 0}
-                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Vraag verwijderen
-                      </button>
                     </div>
                   ) : selectedEdge && selectedEdgeFlow ? (
                     <div className="space-y-4">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                          Relatie details
+                          Geselecteerde relatie
                         </p>
                         <p className="text-sm text-slate-500">
-                          {selectedEdgeFlow.name}
+                          Flow: {selectedEdgeFlow.name}
                         </p>
                       </div>
                       <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
@@ -1427,7 +1821,8 @@ export default function QuestionMapPage() {
                     </div>
                   ) : (
                     <p className="text-sm text-slate-500">
-                      Selecteer een vraag of relatie om te bewerken.
+                      Selecteer links een vraag of klik in het diagram op een
+                      relatie om details te bewerken.
                     </p>
                   )}
                 </div>
@@ -1444,23 +1839,50 @@ export default function QuestionMapPage() {
           >
             Terug
           </button>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
-              onClick={handleReset}
-              disabled={isResetting}
-            >
-              {isResetting ? "Resetten..." : "Reset bibliotheek"}
-            </button>
-            <button
-              type="button"
-              className="h-12 rounded-2xl bg-slate-900 px-8 text-base font-semibold text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-              onClick={handleSave}
-              disabled={isSaving}
-            >
-              {isSaving ? "Opslaan..." : "Opslaan"}
-            </button>
+          <div className="flex flex-col gap-2 text-sm text-slate-500 sm:items-end">
+            <span>
+              {saveStatus === "saving"
+                ? "Opslaan..."
+                : isDirty
+                ? "Wijzigingen nog niet opgeslagen."
+                : "Alles is opgeslagen."}
+            </span>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                onClick={handleCancel}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
+                onClick={handleReset}
+                disabled={isResetting}
+              >
+                {isResetting ? "Resetten..." : "Reset bibliotheek"}
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
+                onClick={handleOverwriteDefault}
+                title="Sla de huidige bibliotheek op als standaard template."
+                disabled={isSavingTemplate}
+              >
+                {isSavingTemplate
+                  ? "Opslaan..."
+                  : "Standaard template overschrijven"}
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-2xl bg-slate-900 px-8 text-base font-semibold text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                onClick={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving ? "Opslaan..." : "Opslaan"}
+              </button>
+            </div>
           </div>
         </div>
       </main>

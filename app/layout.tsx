@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "reactflow/dist/style.css";
 import { WizardProvider } from "./wizard/WizardContext";
 
 const geistSans = Geist({
