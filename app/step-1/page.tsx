@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWizard } from "../wizard/WizardContext";
+import WizardStepIndicator from "../wizard/WizardStepIndicator";
 
 export default function StepOne() {
   const router = useRouter();
@@ -38,6 +39,7 @@ export default function StepOne() {
             Vul de basisgegevens in om de wizard te starten.
           </p>
         </header>
+        <WizardStepIndicator currentStep={1} />
         <form
           className="rounded-3xl border border-white/60 bg-white/70 p-8 shadow-xl shadow-slate-200 backdrop-blur"
           onSubmit={handleSubmit}

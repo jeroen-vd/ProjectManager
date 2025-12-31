@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWizard } from "../wizard/WizardContext";
+import WizardStepIndicator from "../wizard/WizardStepIndicator";
 import { loadWizardConfig } from "../../src/lib/wizardConfigStorage";
 import {
   defaultWizardConfig,
@@ -133,19 +134,28 @@ export default function StepFourPage() {
   const { projectInfo, stepTwo, stepThree, stepFour, setStepFour } =
     useWizard();
   const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
-
   const wizardSnapshot = useMemo(
     () => ({ projectInfo, stepTwo, stepThree, stepFour }),
     [projectInfo, stepTwo, stepThree, stepFour]
   );
 
   useEffect(() => {
-    console.log("Wizard data", wizardSnapshot);
-  }, [wizardSnapshot]);
-
-  useEffect(() => {
     setConfig(loadWizardConfig());
   }, []);
+
+  const handleExport = () => {
+    const fileBase = projectInfo.projectNumber.trim() || "project";
+    const safeBase = fileBase.replace(/[^a-zA-Z0-9-_]+/g, "-");
+    const blob = new Blob([JSON.stringify(wizardSnapshot, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeBase}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const updateComponent = <
     K extends keyof typeof stepFour.components,
@@ -713,6 +723,7 @@ export default function StepFourPage() {
             bestaat.
           </p>
         </header>
+        <WizardStepIndicator currentStep={4} />
 
         {!hasProjectInfo ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
@@ -819,9 +830,9 @@ export default function StepFourPage() {
           <button
             type="button"
             className="h-12 rounded-2xl bg-slate-900 px-8 text-base font-semibold text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-            onClick={() => console.log("Volgende stap", wizardSnapshot)}
+            onClick={handleExport}
           >
-            Volgende stap
+            Afronden en downloaden
           </button>
         </div>
       </main>

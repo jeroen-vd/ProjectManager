@@ -8,6 +8,7 @@ import {
   defaultWizardConfig,
   type WizardConfig,
 } from "../../src/config/wizardConfig.default";
+import WizardStepIndicator from "../wizard/WizardStepIndicator";
 
 const iconMap: Record<string, (className: string) => ReactElement> = {
   bike: (className) => (
@@ -419,6 +420,7 @@ export default function StepTwoPage() {
             </button>
           </div>
         </header>
+        <WizardStepIndicator currentStep={2} />
 
         {!hasProjectInfo ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
@@ -429,6 +431,19 @@ export default function StepTwoPage() {
 
         <section className="rounded-3xl border border-white/60 bg-white/70 p-8 shadow-xl shadow-slate-200 backdrop-blur">
           <div className="space-y-8">
+            <div className="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-sm text-slate-600 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                Snelle uitleg
+              </p>
+              <ol className="mt-2 space-y-1 text-sm text-slate-600">
+                <li>1. Kies een projectcategorie.</li>
+                <li>2. Kies de ontwerpcontext.</li>
+                <li>3. Kies een opstelling als die beschikbaar is.</li>
+              </ol>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Tip: je kunt dit later aanpassen via de configuratieknop.
+              </p>
+            </div>
             <div className="space-y-4">
               <h2 className="text-lg font-semibold text-slate-800">
                 Projectcategorie

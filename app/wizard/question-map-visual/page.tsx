@@ -48,10 +48,13 @@ import {
 type QuestionNodeData = {
   label: string;
   conceptKey: string;
+  order?: number;
+  showOrder?: boolean;
   flags: {
     duplicate: boolean;
     missingOutputs: boolean;
     orphan: boolean;
+    conditional: boolean;
   };
 };
 
@@ -78,7 +81,20 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => (
       position={Position.Top}
       style={handleStyle}
     />
-    <p className="text-sm font-semibold">{data.label}</p>
+    <div className="flex items-start justify-between gap-2">
+      <p className="text-sm font-semibold">{data.label}</p>
+      {data.showOrder && data.order ? (
+        <span
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+            selected
+              ? "border-slate-600 bg-slate-800 text-slate-200"
+              : "border-slate-200 bg-white text-slate-500"
+          }`}
+        >
+          {data.order}
+        </span>
+      ) : null}
+    </div>
     <p
       className={`text-[11px] ${
         selected ? "text-slate-300" : "text-slate-500"
@@ -87,6 +103,17 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => (
       {data.conceptKey}
     </p>
     <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
+      {data.flags.conditional ? (
+        <span
+          className={`rounded-full px-2 py-0.5 font-semibold ${
+            selected
+              ? "bg-sky-500/30 text-sky-100"
+              : "bg-sky-100 text-sky-700"
+          }`}
+        >
+          voorwaardelijk
+        </span>
+      ) : null}
       {data.flags.duplicate ? (
         <span
           className={`rounded-full px-2 py-0.5 font-semibold ${
@@ -160,6 +187,14 @@ const splitList = (value: string) =>
     .filter(Boolean);
 
 const joinList = (items: string[] | undefined) => (items ?? []).join(", ");
+
+const questionKindLabels: Record<Question["kind"], string> = {
+  text: "Tekst",
+  number: "Nummer",
+  boolean: "Ja/Nee",
+  single: "Single choice",
+  multi: "Multi choice",
+};
 
 const fieldMatches = (flowValue?: string, scopeValue?: string) =>
   !flowValue || flowValue === scopeValue;
@@ -250,6 +285,9 @@ export default function QuestionMapVisualPage() {
     "question" | "options" | "outputs"
   >("question");
   const [showHelp, setShowHelp] = useState(true);
+  const [showPreview, setShowPreview] = useState(true);
+  const [showNodeOrder, setShowNodeOrder] = useState(true);
+  const [showConditions, setShowConditions] = useState(false);
   const [isCanvasExpanded, setIsCanvasExpanded] = useState(false);
   const [edgeDraft, setEdgeDraft] = useState({
     from: "",
@@ -521,6 +559,95 @@ export default function QuestionMapVisualPage() {
   const activeFlow = activeSlot
     ? findBestMatchingFlow(library.flows, activeSlot.scope)
     : null;
+  const conditionalNodeIds = useMemo(() => {
+    const set = new Set<string>();
+    if (!activeFlow) {
+      return set;
+    }
+    activeFlow.edges.forEach((edge) => set.add(edge.to));
+    return set;
+  }, [activeFlow]);
+  const { previewMergedFlows, previewMissingFlowLabels } = useMemo(() => {
+    const byLevel = new Map<FlowScope["level"], { flow: Flow; label: string }>();
+    scopeSlots.forEach((slot) => {
+      const flow = findBestMatchingFlow(library.flows, slot.scope);
+      if (flow) {
+        byLevel.set(slot.scope.level, { flow, label: slot.label });
+      }
+    });
+
+    const orderedLevels: FlowScope["level"][] = [
+      "global",
+      "category",
+      "context",
+      "installation",
+    ];
+    const merged = orderedLevels
+      .map((level) => byLevel.get(level))
+      .filter((item): item is { flow: Flow; label: string } => Boolean(item));
+    const missing = scopeSlots
+      .filter((slot) => !byLevel.has(slot.scope.level))
+      .map((slot) => slot.label);
+
+    return { previewMergedFlows: merged, previewMissingFlowLabels: missing };
+  }, [library.flows, scopeSlots]);
+  const previewCombinedFlow = useMemo(() => {
+    const nodes: Flow["nodes"] = [];
+    const edges: Flow["edges"] = [];
+    const seenQuestionIds = new Set<string>();
+
+    previewMergedFlows.forEach(({ flow }) => {
+      flow.nodes.forEach((node) => {
+        if (seenQuestionIds.has(node.questionId)) {
+          return;
+        }
+        seenQuestionIds.add(node.questionId);
+        nodes.push(node);
+      });
+      edges.push(...flow.edges);
+    });
+
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const filteredEdges = edges.filter(
+      (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)
+    );
+
+    return { nodes, edges: filteredEdges };
+  }, [previewMergedFlows]);
+  const previewIncomingEdges = useMemo(() => {
+    const map = new Map<string, Flow["edges"]>();
+    previewCombinedFlow.edges.forEach((edge) => {
+      const list = map.get(edge.to) ?? [];
+      list.push(edge);
+      map.set(edge.to, list);
+    });
+    return map;
+  }, [previewCombinedFlow.edges]);
+  const previewQuestions = useMemo(() => {
+    return previewCombinedFlow.nodes.map((node, index) => {
+      const question = questionMap.get(node.questionId) ?? null;
+      const edges = previewIncomingEdges.get(node.id) ?? [];
+      const conditions = edges
+        .map((edge) => edge.when?.expression)
+        .filter((expression): expression is string => Boolean(expression));
+      return {
+        nodeId: node.id,
+        order: index + 1,
+        question,
+        isConditional: edges.length > 0,
+        conditions,
+      };
+    });
+  }, [previewCombinedFlow.nodes, previewIncomingEdges, questionMap]);
+  const previewFlowSummary = useMemo(
+    () => previewMergedFlows.map((item) => item.label).join(" + "),
+    [previewMergedFlows]
+  );
+  const previewStats = useMemo(() => {
+    const conditional = previewQuestions.filter((item) => item.isConditional)
+      .length;
+    return { total: previewQuestions.length, conditional };
+  }, [previewQuestions]);
 
   useEffect(() => {
     if (!activeFlow) {
@@ -553,7 +680,10 @@ export default function QuestionMapVisualPage() {
         data: {
           label: question?.prompt ?? node.questionId,
           conceptKey: question?.conceptKey ?? node.questionId,
+          order: index + 1,
+          showOrder: showNodeOrder,
           flags: {
+            conditional: conditionalNodeIds.has(node.id),
             duplicate: duplicatePromptIds.has(node.questionId),
             missingOutputs: missingOutputIds.has(node.questionId),
             orphan: orphanQuestionIds.has(node.questionId),
@@ -579,10 +709,12 @@ export default function QuestionMapVisualPage() {
     setEdges(nextEdges);
   }, [
     activeFlow,
+    conditionalNodeIds,
     duplicatePromptIds,
     missingOutputIds,
     orphanQuestionIds,
     questionMap,
+    showNodeOrder,
   ]);
 
   useEffect(() => {
@@ -1875,6 +2007,20 @@ export default function QuestionMapVisualPage() {
                       </span>
                     </div>
                   ) : null}
+                  {hasActiveFlow ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                      <button
+                        type="button"
+                        onClick={() => setShowNodeOrder((prev) => !prev)}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                      >
+                        {showNodeOrder ? "Nummers verbergen" : "Nummers tonen"}
+                      </button>
+                      <span className="text-[10px] text-slate-400">
+                        Nummers tonen de volgorde van deze flow.
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600 shadow-sm">
@@ -1946,6 +2092,10 @@ export default function QuestionMapVisualPage() {
                           </div>
                         </div>
                       </div>
+                      <p>
+                        Global is de basis voor iedereen. Categorie, context en
+                        opstelling voegen extra vragen toe voor deze selectie.
+                      </p>
                       <ul className="space-y-1">
                         <li>Voeg vragen toe met "+ toevoegen" links.</li>
                         <li>
@@ -1963,7 +2113,8 @@ export default function QuestionMapVisualPage() {
                       <p>
                         Relatie betekent: na het beantwoorden van de "van vraag"
                         wordt de "naar vraag" zichtbaar. Voorwaarde is
-                        optioneel.
+                        optioneel; zonder relaties is alles zichtbaar in de
+                        flow-volgorde (nummers zijn alleen visueel).
                       </p>
                     </div>
                   ) : null}
@@ -2181,6 +2332,124 @@ export default function QuestionMapVisualPage() {
                   isCanvasExpanded ? "lg:hidden" : ""
                 }`}
               >
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
+                    Live preview
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowPreview((prev) => !prev)}
+                    className="text-[10px] font-semibold text-slate-500"
+                  >
+                    {showPreview ? "verberg" : "toon"}
+                  </button>
+                </div>
+                {showPreview ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                    <div className="space-y-3 text-xs text-slate-600">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                          Preview stap 3
+                        </p>
+                        <span className="text-[11px] text-slate-400">
+                          {previewFlowSummary || "geen flow"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Zo ziet de vragenlijst eruit voor deze selectie. Relaties
+                        kunnen vragen verbergen.
+                      </p>
+                      <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
+                          {previewStats.total} vragen
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
+                          {previewStats.conditional} voorwaardelijk
+                        </span>
+                      </div>
+                      {previewMissingFlowLabels.length > 0 ? (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+                          Geen flow voor:{" "}
+                          {previewMissingFlowLabels.join(", ")}.
+                        </div>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowNodeOrder((prev) => !prev)}
+                          className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                        >
+                          {showNodeOrder ? "Nummers verbergen" : "Nummers tonen"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowConditions((prev) => !prev)}
+                          className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                        >
+                          {showConditions
+                            ? "Voorwaarden verbergen"
+                            : "Voorwaarden tonen"}
+                        </button>
+                      </div>
+                      <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
+                        {previewQuestions.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+                            Nog geen vragen gevonden voor deze selectie.
+                          </div>
+                        ) : (
+                          previewQuestions.map((item) => {
+                            const kindLabel = item.question
+                              ? questionKindLabels[item.question.kind]
+                              : "Onbekend";
+                            return (
+                              <div
+                                key={item.nodeId}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-start gap-2">
+                                    {showNodeOrder ? (
+                                      <span className="mt-0.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                                        {item.order}
+                                      </span>
+                                    ) : null}
+                                    <div>
+                                      <p className="text-[12px] font-semibold text-slate-700">
+                                        {item.question?.prompt ?? item.nodeId}
+                                      </p>
+                                      <p className="text-[11px] text-slate-400">
+                                        {item.question?.conceptKey ??
+                                          item.nodeId}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                                      {kindLabel}
+                                    </span>
+                                    {item.isConditional ? (
+                                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                                        voorwaardelijk
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                {showConditions && item.isConditional ? (
+                                  <p className="mt-2 text-[11px] text-slate-500">
+                                    Voorwaarde:{" "}
+                                    {item.conditions.length > 0
+                                      ? item.conditions.join(" | ")
+                                      : "geen specifieke regel"}
+                                  </p>
+                                ) : null}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Inspector
                 </h2>

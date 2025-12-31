@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWizard } from "../wizard/WizardContext";
+import WizardStepIndicator from "../wizard/WizardStepIndicator";
 import { loadWizardConfig } from "../../src/lib/wizardConfigStorage";
 import { loadQuestionLibrary } from "../../src/lib/questionLibraryStorage";
 import {
@@ -143,21 +144,12 @@ const formatAnswer = (value: AnswerValue) => {
 
 export default function StepThreePage() {
   const router = useRouter();
-  const { projectInfo, stepTwo, stepThree, setStepThree, setStepTwo } =
-    useWizard();
+  const { stepTwo, stepThree, setStepThree, setStepTwo } = useWizard();
   const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
   const [library, setLibrary] = useState<QuestionLibrary>(
     defaultQuestionLibrary
   );
-
-  const wizardSnapshot = useMemo(
-    () => ({ projectInfo, stepTwo, stepThree }),
-    [projectInfo, stepTwo, stepThree]
-  );
-
-  useEffect(() => {
-    console.log("Wizard data", wizardSnapshot);
-  }, [wizardSnapshot]);
+  const [showConceptKeys, setShowConceptKeys] = useState(false);
 
   useEffect(() => {
     setConfig(loadWizardConfig());
@@ -436,6 +428,7 @@ export default function StepThreePage() {
             Beantwoord de vragen zoals ingesteld in de flowmap.
           </p>
         </header>
+        <WizardStepIndicator currentStep={3} />
 
         <section className="rounded-3xl border border-white/60 bg-white/70 p-8 shadow-xl shadow-slate-200 backdrop-blur">
           <div className="space-y-6">
@@ -456,13 +449,25 @@ export default function StepThreePage() {
                   </p>
                 ) : null}
               </div>
-              <button
-                type="button"
-                onClick={() => router.push("/wizard/question-map-visual")}
-                className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
-              >
-                Flowmap openen
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => router.push("/wizard/question-map-visual")}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Flowmap openen
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={showConceptKeys}
+                  onClick={() => setShowConceptKeys((prev) => !prev)}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  {showConceptKeys
+                    ? "Verberg technische labels"
+                    : "Toon technische labels"}
+                </button>
+              </div>
             </div>
 
             {showGlobalDimensions ? (
@@ -532,9 +537,11 @@ export default function StepThreePage() {
                         <h2 className="text-lg font-semibold text-slate-800">
                           {question.prompt}
                         </h2>
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-500">
-                          {question.conceptKey}
-                        </span>
+                        {showConceptKeys ? (
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-500">
+                            {question.conceptKey}
+                          </span>
+                        ) : null}
                       </div>
                       {question.helpText ? (
                         <p className="mt-2 text-sm text-slate-500">
