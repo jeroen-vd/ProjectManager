@@ -21,18 +21,23 @@ import ReactFlow, {
   type OnSelectionChangeParams,
   type ReactFlowInstance,
 } from "reactflow";
-import { loadWizardConfig } from "../../../src/lib/wizardConfigStorage";
+import {
+  loadWizardConfig,
+  saveWizardConfig,
+} from "../../../src/lib/wizardConfigStorage";
 import {
   defaultWizardConfig,
   type WizardConfig,
 } from "../../../src/config/wizardConfig.default";
 import {
   defaultQuestionLibrary,
+  type AnswerOption,
   type Flow,
   type FlowEdge,
   type FlowScope,
   type Question,
   type QuestionLibrary,
+  type TaskOutput,
 } from "../../../src/config/questionLibrary.default";
 import {
   loadQuestionLibrary,
@@ -58,6 +63,7 @@ const handleStyle = {
 };
 
 const HELP_STORAGE_KEY = "question-map-visual-help";
+const CANVAS_SIZE_STORAGE_KEY = "question-map-visual-canvas-size";
 
 const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => (
   <div
@@ -155,13 +161,34 @@ const splitList = (value: string) =>
 
 const joinList = (items: string[] | undefined) => (items ?? []).join(", ");
 
-const fieldMatches = (a?: string, b?: string) => (a ?? "") === (b ?? "");
+const fieldMatches = (flowValue?: string, scopeValue?: string) =>
+  !flowValue || flowValue === scopeValue;
+
+const flowSpecificity = (scope?: FlowScope) =>
+  [scope?.categoryId, scope?.contextId, scope?.installationId].filter(Boolean)
+    .length;
 
 const matchesScope = (flow: Flow, scope: FlowScope) =>
   flow.scope?.level === scope.level &&
   fieldMatches(flow.scope?.categoryId, scope.categoryId) &&
   fieldMatches(flow.scope?.contextId, scope.contextId) &&
   fieldMatches(flow.scope?.installationId, scope.installationId);
+
+const findBestMatchingFlow = (flows: Flow[], scope: FlowScope) => {
+  let best: Flow | null = null;
+  let bestScore = -1;
+  flows.forEach((flow) => {
+    if (!matchesScope(flow, scope)) {
+      return;
+    }
+    const score = flowSpecificity(flow.scope);
+    if (score > bestScore) {
+      best = flow;
+      bestScore = score;
+    }
+  });
+  return best;
+};
 
 const questionHasOutputs = (question: Question) => {
   if ((question.outputs ?? []).length > 0) {
@@ -199,6 +226,8 @@ export default function QuestionMapVisualPage() {
   const [nodes, setNodes] = useState<Node<QuestionNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const flowInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const pendingFitRef = useRef(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [isFlowReady, setIsFlowReady] = useState(false);
   const historyRef = useRef<{ past: QuestionLibrary[]; future: QuestionLibrary[] }>({
     past: [],
@@ -217,7 +246,11 @@ export default function QuestionMapVisualPage() {
     "idle"
   );
   const [isDirty, setIsDirty] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<
+    "question" | "options" | "outputs"
+  >("question");
   const [showHelp, setShowHelp] = useState(true);
+  const [isCanvasExpanded, setIsCanvasExpanded] = useState(false);
   const [edgeDraft, setEdgeDraft] = useState({
     from: "",
     to: "",
@@ -243,6 +276,26 @@ export default function QuestionMapVisualPage() {
       showHelp ? "show" : "hidden"
     );
   }, [showHelp]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const stored = window.localStorage.getItem(CANVAS_SIZE_STORAGE_KEY);
+    if (stored === "expanded") {
+      setIsCanvasExpanded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      CANVAS_SIZE_STORAGE_KEY,
+      isCanvasExpanded ? "expanded" : "normal"
+    );
+  }, [isCanvasExpanded]);
 
   useEffect(() => {
     const loadedConfig = loadWizardConfig();
@@ -466,8 +519,16 @@ export default function QuestionMapVisualPage() {
 
   const activeSlot = scopeSlots[activeScopeIndex] ?? scopeSlots[0] ?? null;
   const activeFlow = activeSlot
-    ? library.flows.find((flow) => matchesScope(flow, activeSlot.scope)) ?? null
+    ? findBestMatchingFlow(library.flows, activeSlot.scope)
     : null;
+
+  useEffect(() => {
+    if (!activeFlow) {
+      pendingFitRef.current = false;
+      return;
+    }
+    pendingFitRef.current = true;
+  }, [activeFlow?.id]);
 
   useEffect(() => {
     setSelectedQuestionId(null);
@@ -523,6 +584,20 @@ export default function QuestionMapVisualPage() {
     orphanQuestionIds,
     questionMap,
   ]);
+
+  useEffect(() => {
+    if (!isFlowReady || !pendingFitRef.current) {
+      return;
+    }
+    if (nodes.length === 0) {
+      pendingFitRef.current = false;
+      return;
+    }
+    pendingFitRef.current = false;
+    requestAnimationFrame(() => {
+      flowInstanceRef.current?.fitView({ padding: 0.2, duration: 200 });
+    });
+  }, [isFlowReady, nodes]);
 
   useEffect(() => {
     if (!activeFlow) {
@@ -687,6 +762,50 @@ export default function QuestionMapVisualPage() {
         question.id === questionId ? { ...question, ...updates } : question
       ),
     }));
+  };
+
+  const addOption = (question: Question) => {
+    const options = question.options ?? [];
+    const nextOption: AnswerOption = {
+      id: uniqueId("opt", options.map((option) => option.id)),
+      label: "Nieuwe optie",
+      value: "Nieuwe optie",
+      outputs: [],
+    };
+    updateQuestion(question.id, { options: [...options, nextOption] });
+  };
+
+  const updateOption = (
+    question: Question,
+    optionId: string,
+    updates: Partial<AnswerOption>
+  ) => {
+    const options = (question.options ?? []).map((option) =>
+      option.id === optionId ? { ...option, ...updates } : option
+    );
+    updateQuestion(question.id, { options });
+  };
+
+  const removeOption = (question: Question, optionId: string) => {
+    const options = (question.options ?? []).filter(
+      (option) => option.id !== optionId
+    );
+    updateQuestion(question.id, { options });
+  };
+
+  const updateOutputs = (question: Question, outputs: TaskOutput[]) => {
+    updateQuestion(question.id, { outputs });
+  };
+
+  const updateOptionOutputs = (
+    question: Question,
+    optionId: string,
+    outputs: TaskOutput[]
+  ) => {
+    const options = (question.options ?? []).map((option) =>
+      option.id === optionId ? { ...option, outputs } : option
+    );
+    updateQuestion(question.id, { options });
   };
 
   const addFlowForScope = (scopeItem: FlowScope, label: string) => {
@@ -941,6 +1060,221 @@ export default function QuestionMapVisualPage() {
     }
   };
 
+  const buildInitialScope = (nextConfig: WizardConfig) => {
+    const firstCategory = nextConfig.categories[0]?.id ?? "";
+    const firstContext = firstCategory
+      ? nextConfig.contextsByCategory[firstCategory]?.[0]?.id ?? ""
+      : "";
+    const firstInstallation = firstContext
+      ? nextConfig.installationsByContext[firstContext]?.[0] ?? ""
+      : "";
+    return {
+      categoryId: firstCategory,
+      contextId: firstContext,
+      installationId: firstInstallation,
+    };
+  };
+
+  const handleExport = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      questionLibrary: library,
+      wizardConfig: config,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `wizard-backup-${dateStamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const nextLibrary =
+          parsed?.questionLibrary ?? parsed?.library ?? parsed;
+        const nextConfig = parsed?.wizardConfig ?? parsed?.config ?? null;
+        if (
+          !nextLibrary ||
+          !Array.isArray(nextLibrary.questions) ||
+          !Array.isArray(nextLibrary.flows)
+        ) {
+          alert("Import mislukt: geen geldige bibliotheek gevonden.");
+          return;
+        }
+
+        const confirmMessage = `Importeer ${nextLibrary.questions.length} vragen en ${nextLibrary.flows.length} flows? Dit overschrijft je huidige data.`;
+        if (!window.confirm(confirmMessage)) {
+          return;
+        }
+
+        if (nextConfig && typeof nextConfig === "object") {
+          saveWizardConfig(nextConfig as WizardConfig);
+          const normalizedConfig = loadWizardConfig();
+          setConfig(normalizedConfig);
+          setScope(buildInitialScope(normalizedConfig));
+        }
+
+        saveQuestionLibrary(nextLibrary as QuestionLibrary);
+        const normalizedLibrary = loadQuestionLibrary();
+
+        isRestoringRef.current = true;
+        historyRef.current = { past: [], future: [] };
+        pendingFitRef.current = true;
+        setCanUndo(false);
+        setCanRedo(false);
+        setLibrary(normalizedLibrary);
+        lastLibraryRef.current = normalizedLibrary;
+        lastSavedRef.current = normalizedLibrary;
+        lastManualSaveRef.current = normalizedLibrary;
+        setSaveStatus("saved");
+        setIsDirty(false);
+        setSelectedQuestionId(null);
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        setEdgeDraft({ from: "", to: "", expression: "" });
+      } catch {
+        alert("Import mislukt: bestand is geen geldige JSON.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const OutputEditor = ({
+    outputs,
+    onChange,
+  }: {
+    outputs: TaskOutput[] | undefined;
+    onChange: (next: TaskOutput[]) => void;
+  }) => {
+    const list = outputs ?? [];
+    return (
+      <div className="space-y-3">
+        {list.map((output) => (
+          <div
+            key={output.id}
+            className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-700"
+          >
+            <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+              Titel template
+              <input
+                value={output.titleTemplate}
+                onChange={(event) => {
+                  const next = list.map((entry) =>
+                    entry.id === output.id
+                      ? { ...entry, titleTemplate: event.target.value }
+                      : entry
+                  );
+                  onChange(next);
+                }}
+                placeholder="Bijv. Bepaal materiaal: {{answer}}"
+                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              />
+            </label>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+                Prioriteit
+                <select
+                  value={output.priority}
+                  onChange={(event) => {
+                    const next = list.map((entry) =>
+                      entry.id === output.id
+                        ? {
+                            ...entry,
+                            priority: event.target.value as TaskOutput["priority"],
+                          }
+                        : entry
+                    );
+                    onChange(next);
+                  }}
+                  className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                >
+                  <option value="low">Laag</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">Hoog</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+                Tags
+                <input
+                  value={joinList(output.tags)}
+                  onChange={(event) => {
+                    const next = list.map((entry) =>
+                      entry.id === output.id
+                        ? { ...entry, tags: splitList(event.target.value) }
+                        : entry
+                    );
+                    onChange(next);
+                  }}
+                  placeholder="bijv. planning, staal"
+                  className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+            </div>
+            <label className="mt-3 flex flex-col gap-2 text-xs font-semibold text-slate-500">
+              Afhankelijk van
+              <input
+                value={joinList(output.dependsOn)}
+                onChange={(event) => {
+                  const next = list.map((entry) =>
+                    entry.id === output.id
+                      ? { ...entry, dependsOn: splitList(event.target.value) }
+                      : entry
+                  );
+                  onChange(next);
+                }}
+                placeholder="bijv. task-1, task-2"
+                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                onChange(list.filter((entry) => entry.id !== output.id))
+              }
+              className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              Verwijderen
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() =>
+            onChange([
+              ...list,
+              {
+                id: uniqueId("task", list.map((item) => item.id)),
+                titleTemplate: "",
+                priority: "medium",
+                tags: [],
+                dependsOn: [],
+              },
+            ])
+          }
+          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+        >
+          + output toevoegen
+        </button>
+      </div>
+    );
+  };
+
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       setNodes((current) => applyNodeChanges(changes, current));
@@ -1034,7 +1368,7 @@ export default function QuestionMapVisualPage() {
   }, [activeFlow]);
 
   const handleNodeDragStop = useCallback((_event: unknown, node: Node) => {
-    if (!activeFlow) {
+    if (!activeFlow || !node?.id) {
       return;
     }
     setLibrary((prev) => ({
@@ -1045,7 +1379,7 @@ export default function QuestionMapVisualPage() {
               ...flow,
               nodes: flow.nodes.map((item) =>
                 item.id === node.id
-                  ? { ...item, position: node.position }
+                  ? { ...item, position: node.position ?? item.position }
                   : item
               ),
             }
@@ -1420,7 +1754,11 @@ export default function QuestionMapVisualPage() {
             </div>
 
             <div className="grid gap-6 lg:grid-cols-12">
-              <div className="space-y-4 lg:col-span-3">
+              <div
+                className={`space-y-4 lg:col-span-3 ${
+                  isCanvasExpanded ? "lg:hidden" : ""
+                }`}
+              >
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
                     Vraagbibliotheek
@@ -1493,7 +1831,11 @@ export default function QuestionMapVisualPage() {
                 </div>
               </div>
 
-              <div className="space-y-4 lg:col-span-6">
+              <div
+                className={`space-y-4 ${
+                  isCanvasExpanded ? "lg:col-span-12" : "lg:col-span-6"
+                }`}
+              >
                 <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-xs text-slate-600 shadow-sm">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
@@ -1731,6 +2073,16 @@ export default function QuestionMapVisualPage() {
                           >
                             Passend
                           </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIsCanvasExpanded((prev) => !prev)
+                            }
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                            title="Vergroot of verklein het canvas"
+                          >
+                            {isCanvasExpanded ? "Canvas normaal" : "Canvas groot"}
+                          </button>
                         </div>
                         {selectedNodeId || selectedEdgeId ? (
                           <div className="w-full pt-2 text-[11px] text-slate-500">
@@ -1746,7 +2098,11 @@ export default function QuestionMapVisualPage() {
                           </div>
                         ) : null}
                       </div>
-                      <div className="relative h-[560px]">
+                      <div
+                        className={`relative ${
+                          isCanvasExpanded ? "h-[75vh]" : "h-[560px]"
+                        }`}
+                      >
                         <ReactFlow
                           nodes={nodes}
                           edges={edges}
@@ -1820,7 +2176,11 @@ export default function QuestionMapVisualPage() {
                 </div>
               </div>
 
-              <div className="space-y-4 lg:col-span-3">
+              <div
+                className={`space-y-4 lg:col-span-3 ${
+                  isCanvasExpanded ? "lg:hidden" : ""
+                }`}
+              >
                 <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Inspector
                 </h2>
@@ -1839,103 +2199,263 @@ export default function QuestionMapVisualPage() {
                             {selectedQuestion.id}
                           </p>
                         </div>
-                        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                          Concept key
-                          <input
-                            value={selectedQuestion.conceptKey}
-                            onChange={(event) =>
-                              updateQuestion(selectedQuestion.id, {
-                                conceptKey: event.target.value,
-                              })
-                            }
-                            className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                          Vraagtekst
-                          <textarea
-                            value={selectedQuestion.prompt}
-                            onChange={(event) =>
-                              updateQuestion(selectedQuestion.id, {
-                                prompt: event.target.value,
-                              })
-                            }
-                            rows={3}
-                            className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                          Type
-                          <select
-                            value={selectedQuestion.kind}
-                            onChange={(event) =>
-                              updateQuestion(selectedQuestion.id, {
-                                kind: event.target.value as Question["kind"],
-                              })
-                            }
-                            className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setDetailsTab("question")}
+                            aria-pressed={detailsTab === "question"}
+                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                              detailsTab === "question"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                            }`}
                           >
-                            <option value="text">Tekst</option>
-                            <option value="number">Nummer</option>
-                            <option value="boolean">Ja/Nee</option>
-                            <option value="single">Single choice</option>
-                            <option value="multi">Multi choice</option>
-                          </select>
-                        </label>
-                        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                          Tags
-                          <input
-                            value={joinList(selectedQuestion.tags)}
-                            onChange={(event) =>
-                              updateQuestion(selectedQuestion.id, {
-                                tags: splitList(event.target.value),
-                              })
-                            }
-                            placeholder="bijv. materiaal, compliance"
-                            className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                          />
-                        </label>
-                        {activeFlow ? (
-                          flowQuestionIds.has(selectedQuestion.id) ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const nodeId = activeFlow.nodes.find(
-                                  (node) =>
-                                    node.questionId === selectedQuestion.id
-                                )?.id;
-                                if (nodeId) {
-                                  removeNodeFromFlow(activeFlow.id, nodeId);
+                            Vraag
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDetailsTab("options")}
+                            aria-pressed={detailsTab === "options"}
+                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                              detailsTab === "options"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                            }`}
+                          >
+                            Opties
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDetailsTab("outputs")}
+                            aria-pressed={detailsTab === "outputs"}
+                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                              detailsTab === "outputs"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                            }`}
+                          >
+                            Outputs
+                          </button>
+                        </div>
+                        {detailsTab === "question" ? (
+                          <div className="space-y-4">
+                            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                              Concept key
+                              <input
+                                value={selectedQuestion.conceptKey}
+                                onChange={(event) =>
+                                  updateQuestion(selectedQuestion.id, {
+                                    conceptKey: event.target.value,
+                                  })
                                 }
-                              }}
-                              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
-                            >
-                              Verwijder uit flow
-                            </button>
-                          ) : (
+                                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                              Vraagtekst
+                              <textarea
+                                value={selectedQuestion.prompt}
+                                onChange={(event) =>
+                                  updateQuestion(selectedQuestion.id, {
+                                    prompt: event.target.value,
+                                  })
+                                }
+                                rows={3}
+                                className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                              Type
+                              <select
+                                value={selectedQuestion.kind}
+                                onChange={(event) =>
+                                  updateQuestion(selectedQuestion.id, {
+                                    kind: event.target.value as Question["kind"],
+                                  })
+                                }
+                                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                              >
+                                <option value="text">Tekst</option>
+                                <option value="number">Nummer</option>
+                                <option value="boolean">Ja/Nee</option>
+                                <option value="single">Single choice</option>
+                                <option value="multi">Multi choice</option>
+                              </select>
+                            </label>
+                            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                              Tags
+                              <input
+                                value={joinList(selectedQuestion.tags)}
+                                onChange={(event) =>
+                                  updateQuestion(selectedQuestion.id, {
+                                    tags: splitList(event.target.value),
+                                  })
+                                }
+                                placeholder="bijv. materiaal, compliance"
+                                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                              />
+                            </label>
+                            {activeFlow ? (
+                              flowQuestionIds.has(selectedQuestion.id) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nodeId = activeFlow.nodes.find(
+                                      (node) =>
+                                        node.questionId === selectedQuestion.id
+                                    )?.id;
+                                    if (nodeId) {
+                                      removeNodeFromFlow(activeFlow.id, nodeId);
+                                    }
+                                  }}
+                                  className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
+                                >
+                                  Verwijder uit flow
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    activeFlow
+                                      ? addQuestionToFlow(
+                                          activeFlow.id,
+                                          selectedQuestion.id
+                                        )
+                                      : null
+                                  }
+                                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                                >
+                                  Toevoegen aan flow
+                                </button>
+                              )
+                            ) : null}
                             <button
                               type="button"
-                              onClick={() =>
-                                activeFlow
-                                  ? addQuestionToFlow(
-                                      activeFlow.id,
-                                      selectedQuestion.id
-                                    )
-                                  : null
-                              }
-                              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                              onClick={() => router.push("/wizard/question-map")}
+                              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
                             >
-                              Toevoegen aan flow
+                              Open detailbewerking
                             </button>
-                          )
+                          </div>
                         ) : null}
-                        <button
-                          type="button"
-                          onClick={() => router.push("/wizard/question-map")}
-                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
-                        >
-                          Open detailbewerking
-                        </button>
+
+                        {detailsTab === "options" ? (
+                          <div className="space-y-3">
+                            {selectedQuestion.kind === "single" ||
+                            selectedQuestion.kind === "multi" ? (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                    Opties
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => addOption(selectedQuestion)}
+                                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                                  >
+                                    + optie
+                                  </button>
+                                </div>
+                                <div className="space-y-3">
+                                  {(selectedQuestion.options ?? []).map(
+                                    (option) => (
+                                      <div
+                                        key={option.id}
+                                        className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600"
+                                      >
+                                        <div className="grid gap-2 sm:grid-cols-2">
+                                          <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+                                            Label
+                                            <input
+                                              value={option.label}
+                                              onChange={(event) =>
+                                                updateOption(
+                                                  selectedQuestion,
+                                                  option.id,
+                                                  {
+                                                    label: event.target.value,
+                                                  }
+                                                )
+                                              }
+                                              className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                                            />
+                                          </label>
+                                          <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+                                            Value
+                                            <input
+                                              value={option.value}
+                                              onChange={(event) =>
+                                                updateOption(
+                                                  selectedQuestion,
+                                                  option.id,
+                                                  {
+                                                    value: event.target.value,
+                                                  }
+                                                )
+                                              }
+                                              className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                                            />
+                                          </label>
+                                        </div>
+                                        <details className="mt-3">
+                                          <summary className="cursor-pointer text-xs font-semibold text-slate-500">
+                                            Outputs voor optie
+                                          </summary>
+                                          <div className="mt-3">
+                                            <OutputEditor
+                                              outputs={option.outputs ?? []}
+                                              onChange={(next) =>
+                                                updateOptionOutputs(
+                                                  selectedQuestion,
+                                                  option.id,
+                                                  next
+                                                )
+                                              }
+                                            />
+                                          </div>
+                                        </details>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            removeOption(
+                                              selectedQuestion,
+                                              option.id
+                                            )
+                                          }
+                                          className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
+                                        >
+                                          Optie verwijderen
+                                        </button>
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-slate-500">
+                                Deze vraag heeft geen opties. Kies type Single
+                                choice of Multi choice.
+                              </p>
+                            )}
+                          </div>
+                        ) : null}
+
+                        {detailsTab === "outputs" ? (
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                              Outputs (planning)
+                            </p>
+                            <p className="text-[11px] text-slate-400">
+                              Outputs sturen de takenlijst in de planning.
+                            </p>
+                            <OutputEditor
+                              outputs={selectedQuestion.outputs ?? []}
+                              onChange={(next) =>
+                                updateOutputs(selectedQuestion, next)
+                              }
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     ) : selectedEdge && activeFlow ? (
                       <div className="space-y-4">
@@ -2163,23 +2683,56 @@ export default function QuestionMapVisualPage() {
           </div>
         </section>
 
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <button
-            type="button"
-            className="h-12 rounded-2xl border border-slate-200 bg-white px-8 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
-            onClick={() => router.push("/wizard/question-map")}
-          >
-            Terug
-          </button>
-          <div className="flex flex-col gap-2 text-sm text-slate-500 sm:items-end">
-            <span>
-              {saveStatus === "saving"
-                ? "Opslaan..."
-                : isDirty
-                ? "Wijzigingen nog niet opgeslagen."
-                : "Alles is opgeslagen."}
-            </span>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              className="h-12 rounded-2xl border border-slate-200 bg-white px-8 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              onClick={() => router.push("/wizard/question-map")}
+            >
+              Terug
+            </button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+              <button
+                type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                onClick={handleExport}
+              >
+                Exporteren
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                onClick={() => importInputRef.current?.click()}
+              >
+                Importeren
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
+                onClick={handleReset}
+                disabled={isResetting}
+              >
+                {isResetting ? "Resetten..." : "Reset bibliotheek"}
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
+                onClick={handleOverwriteDefault}
+                title="Sla de huidige bibliotheek op als standaard template."
+                disabled={isSavingTemplate}
+              >
+                {isSavingTemplate
+                  ? "Opslaan..."
+                  : "Standaard template overschrijven"}
+              </button>
               <button
                 type="button"
                 className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
@@ -2187,35 +2740,23 @@ export default function QuestionMapVisualPage() {
               >
                 Annuleren
               </button>
-            <button
-              type="button"
-              className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
-              onClick={handleReset}
-              disabled={isResetting}
-            >
-              {isResetting ? "Resetten..." : "Reset bibliotheek"}
-            </button>
-            <button
-              type="button"
-              className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
-              onClick={handleOverwriteDefault}
-              title="Sla de huidige bibliotheek op als standaard template."
-              disabled={isSavingTemplate}
-            >
-              {isSavingTemplate
-                ? "Opslaan..."
-                : "Standaard template overschrijven"}
-            </button>
-            <button
-              type="button"
-              className="h-12 rounded-2xl bg-slate-900 px-8 text-base font-semibold text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-              onClick={handleSave}
-              disabled={isSaving}
-            >
-              {isSaving ? "Opslaan..." : "Opslaan"}
-            </button>
+              <button
+                type="button"
+                className="h-12 rounded-2xl bg-slate-900 px-8 text-base font-semibold text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                onClick={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving ? "Opslaan..." : "Opslaan"}
+              </button>
             </div>
           </div>
+          <span className="text-sm text-slate-500 sm:text-right">
+            {saveStatus === "saving"
+              ? "Opslaan..."
+              : isDirty
+              ? "Wijzigingen nog niet opgeslagen."
+              : "Alles is opgeslagen."}
+          </span>
         </div>
       </main>
     </div>

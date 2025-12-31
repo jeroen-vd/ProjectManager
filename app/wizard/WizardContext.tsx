@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 export type ProjectInfo = {
   projectNumber: string;
@@ -166,7 +166,7 @@ const initialStepFour: StepFourData = {
 const WizardContext = createContext<WizardState | undefined>(undefined);
 
 export function WizardProvider({ children }: { children: React.ReactNode }) {
-  const [projectInfo, setProjectInfo] =
+  const [projectInfo, setProjectInfoState] =
     useState<ProjectInfo>(initialProjectInfo);
   const [stepTwo, setStepTwoState] = useState<StepTwoData>(initialStepTwo);
   const [stepThree, setStepThreeState] =
@@ -174,20 +174,24 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
   const [stepFour, setStepFourState] =
     useState<StepFourData>(initialStepFour);
 
-  const setStepTwo = (update: Partial<StepTwoData>) => {
-    setStepTwoState((prev) => ({ ...prev, ...update }));
-  };
+  const setProjectInfo = useCallback((info: ProjectInfo) => {
+    setProjectInfoState(info);
+  }, []);
 
-  const setStepThree = (update: Partial<StepThreeData>) => {
+  const setStepTwo = useCallback((update: Partial<StepTwoData>) => {
+    setStepTwoState((prev) => ({ ...prev, ...update }));
+  }, []);
+
+  const setStepThree = useCallback((update: Partial<StepThreeData>) => {
     setStepThreeState((prev) => ({
       ...prev,
       ...update,
       extras: update.extras ? { ...prev.extras, ...update.extras } : prev.extras,
       en1090: update.en1090 ? { ...prev.en1090, ...update.en1090 } : prev.en1090,
     }));
-  };
+  }, []);
 
-  const setStepFour = (update: Partial<StepFourData>) => {
+  const setStepFour = useCallback((update: Partial<StepFourData>) => {
     setStepFourState((prev) => ({
       ...prev,
       ...update,
@@ -200,7 +204,7 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
         ...(update.options ?? {}),
       },
     }));
-  };
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -213,7 +217,16 @@ export function WizardProvider({ children }: { children: React.ReactNode }) {
       setStepThree,
       setStepFour,
     }),
-    [projectInfo, stepTwo, stepThree, stepFour]
+    [
+      projectInfo,
+      setProjectInfo,
+      setStepTwo,
+      setStepThree,
+      setStepFour,
+      stepTwo,
+      stepThree,
+      stepFour,
+    ]
   );
 
   return (

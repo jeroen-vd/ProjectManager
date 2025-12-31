@@ -1,6 +1,15 @@
 import { defaultWizardConfig, WizardConfig } from "../config/wizardConfig.default";
 
 const STORAGE_KEY = "wizardConfig";
+const SAFE_MODE_PARAM = "safe";
+
+const isSafeMode = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const params = new URLSearchParams(window.location.search);
+  return params.get(SAFE_MODE_PARAM) === "1";
+};
 
 const buildDefaultContextIconMap = () => {
   const entries = Object.values(defaultWizardConfig.contextsByCategory).flat();
@@ -72,6 +81,9 @@ const normalizeConfig = (raw: WizardConfig | null): WizardConfig => {
 
 export function loadWizardConfig(): WizardConfig {
   if (typeof window === "undefined") {
+    return defaultWizardConfig;
+  }
+  if (isSafeMode()) {
     return defaultWizardConfig;
   }
 

@@ -4,6 +4,15 @@ import {
 } from "../config/questionLibrary.default";
 
 const STORAGE_KEY = "questionLibrary";
+const SAFE_MODE_PARAM = "safe";
+
+const isSafeMode = () => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const params = new URLSearchParams(window.location.search);
+  return params.get(SAFE_MODE_PARAM) === "1";
+};
 
 const normalizeLibrary = (raw: QuestionLibrary | null): QuestionLibrary => {
   if (!raw) {
@@ -53,6 +62,9 @@ const normalizeLibrary = (raw: QuestionLibrary | null): QuestionLibrary => {
 
 export function loadQuestionLibrary(): QuestionLibrary {
   if (typeof window === "undefined") {
+    return defaultQuestionLibrary;
+  }
+  if (isSafeMode()) {
     return defaultQuestionLibrary;
   }
 

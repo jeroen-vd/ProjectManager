@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import { useWizard } from "../wizard/WizardContext";
 import { loadWizardConfig } from "../../src/lib/wizardConfigStorage";
@@ -160,15 +160,6 @@ export default function StepTwoPage() {
   const { projectInfo, stepTwo, setStepTwo } = useWizard();
   const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
 
-  const wizardSnapshot = useMemo(
-    () => ({ projectInfo, stepTwo }),
-    [projectInfo, stepTwo]
-  );
-
-  useEffect(() => {
-    console.log("Wizard data", wizardSnapshot);
-  }, [wizardSnapshot]);
-
   useEffect(() => {
     setConfig(loadWizardConfig());
   }, []);
@@ -243,6 +234,162 @@ export default function StepTwoPage() {
     config.installationLabels[stepTwo.installationType] ??
     stepTwo.installationType;
 
+  const handleSelectCategory = useCallback(
+    (categoryId: string) => {
+      setStepTwo({
+        projectCategory: categoryId,
+        designContext: "",
+        installationType: "",
+      });
+    },
+    [setStepTwo]
+  );
+
+  const handleSelectContext = useCallback(
+    (contextId: string) => {
+      setStepTwo({
+        designContext: contextId,
+        installationType: "",
+      });
+    },
+    [setStepTwo]
+  );
+
+  const handleSelectInstallation = useCallback(
+    (installationId: string) => {
+      setStepTwo({ installationType: installationId });
+    },
+    [setStepTwo]
+  );
+
+  const categoryCards = useMemo(
+    () =>
+      config.categories.map((type) => {
+        const isSelected = stepTwo.projectCategory === type.id;
+        return (
+          <label
+            key={type.id}
+            className={`group flex cursor-pointer flex-col gap-2 rounded-2xl border px-4 py-5 text-sm font-medium transition ${
+              isSelected
+                ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
+                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <input
+              type="radio"
+              name="projectCategory"
+              value={type.id}
+              checked={isSelected}
+              onChange={() => handleSelectCategory(type.id)}
+              className="sr-only"
+              required
+            />
+            <span
+              className={`${
+                isSelected
+                  ? "text-slate-200"
+                  : "text-slate-400 group-hover:text-slate-500"
+              }`}
+            >
+              {renderIcon(type.iconKey, "h-9 w-9")}
+            </span>
+            <span className="text-base font-semibold">{type.label}</span>
+            <span
+              className={`text-xs ${
+                isSelected ? "text-slate-200" : "text-slate-500"
+              }`}
+            >
+              Selecteer om verder te gaan
+            </span>
+          </label>
+        );
+      }),
+    [config.categories, handleSelectCategory, stepTwo.projectCategory]
+  );
+
+  const contextCards = useMemo(
+    () =>
+      availableContexts.map((context) => {
+        const isSelected = stepTwo.designContext === context.id;
+        return (
+          <label
+            key={context.id}
+            className={`group flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-4 text-sm font-medium transition ${
+              isSelected
+                ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
+                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <input
+              type="radio"
+              name="designContext"
+              value={context.id}
+              checked={isSelected}
+              onChange={() => handleSelectContext(context.id)}
+              className="sr-only"
+              required
+            />
+            <span
+              className={`${
+                isSelected
+                  ? "text-slate-200"
+                  : "text-slate-400 group-hover:text-slate-500"
+              }`}
+            >
+              {renderIcon(context.iconKey, "h-8 w-8")}
+            </span>
+            <span className="text-base font-semibold">{context.label}</span>
+          </label>
+        );
+      }),
+    [availableContexts, handleSelectContext, stepTwo.designContext]
+  );
+
+  const installationCards = useMemo(() => {
+    const options =
+      config.installationsByContext[stepTwo.designContext] || [];
+    return options.map((optionId) => {
+      const isSelected = stepTwo.installationType === optionId;
+      return (
+        <label
+          key={optionId}
+          className={`group flex cursor-pointer items-center justify-center rounded-2xl border px-4 py-5 text-sm font-semibold transition ${
+            isSelected
+              ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
+              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+          }`}
+        >
+          <input
+            type="radio"
+            name="installationType"
+            value={optionId}
+            checked={isSelected}
+            onChange={() => handleSelectInstallation(optionId)}
+            className="sr-only"
+            required
+          />
+          <span
+            className={`mr-2 ${
+              isSelected
+                ? "text-slate-200"
+                : "text-slate-400 group-hover:text-slate-500"
+            }`}
+          >
+            {renderIcon(config.installationIcons[optionId], "h-5 w-5")}
+          </span>
+          {config.installationLabels[optionId] ?? optionId}
+        </label>
+      );
+    });
+  }, [
+    config.installationIcons,
+    config.installationLabels,
+    config.installationsByContext,
+    handleSelectInstallation,
+    stepTwo.designContext,
+    stepTwo.installationType,
+  ]);
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e2e8f0_100%)] px-6 py-16 text-slate-900">
       <main className="mx-auto flex w-full max-w-4xl flex-col gap-10">
@@ -287,54 +434,7 @@ export default function StepTwoPage() {
                 Projectcategorie
               </h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {config.categories.map((type) => {
-                  const isSelected = stepTwo.projectCategory === type.id;
-                  return (
-                    <label
-                      key={type.id}
-                      className={`group flex cursor-pointer flex-col gap-2 rounded-2xl border px-4 py-5 text-sm font-medium transition ${
-                        isSelected
-                          ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="projectCategory"
-                        value={type.id}
-                        checked={isSelected}
-                        onChange={() =>
-                          setStepTwo({
-                            projectCategory: type.id,
-                            designContext: "",
-                            installationType: "",
-                          })
-                        }
-                        className="sr-only"
-                        required
-                      />
-                      <span
-                        className={`${
-                          isSelected
-                            ? "text-slate-200"
-                            : "text-slate-400 group-hover:text-slate-500"
-                        }`}
-                      >
-                        {renderIcon(type.iconKey, "h-9 w-9")}
-                      </span>
-                      <span className="text-base font-semibold">
-                        {type.label}
-                      </span>
-                      <span
-                        className={`text-xs ${
-                          isSelected ? "text-slate-200" : "text-slate-500"
-                        }`}
-                      >
-                        Selecteer om verder te gaan
-                      </span>
-                    </label>
-                  );
-                })}
+                {categoryCards}
               </div>
             </div>
 
@@ -343,46 +443,7 @@ export default function StepTwoPage() {
                 Ontwerpcontext
               </h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {availableContexts.map((context) => {
-                  const isSelected = stepTwo.designContext === context.id;
-                  return (
-                    <label
-                      key={context.id}
-                      className={`group flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-4 text-sm font-medium transition ${
-                        isSelected
-                          ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="designContext"
-                        value={context.id}
-                        checked={isSelected}
-                        onChange={() =>
-                          setStepTwo({
-                            designContext: context.id,
-                            installationType: "",
-                          })
-                        }
-                        className="sr-only"
-                        required
-                      />
-                      <span
-                        className={`${
-                          isSelected
-                            ? "text-slate-200"
-                            : "text-slate-400 group-hover:text-slate-500"
-                        }`}
-                      >
-                        {renderIcon(context.iconKey, "h-8 w-8")}
-                      </span>
-                      <span className="text-base font-semibold">
-                        {context.label}
-                      </span>
-                    </label>
-                  );
-                })}
+                {contextCards}
               </div>
             </div>
 
@@ -392,97 +453,11 @@ export default function StepTwoPage() {
                   Opstelling / inbouw
                 </h2>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {(
-                    config.installationsByContext[stepTwo.designContext] || []
-                  ).map((optionId) => {
-                    const isSelected =
-                      stepTwo.installationType === optionId;
-                    return (
-                      <label
-                        key={optionId}
-                        className={`group flex cursor-pointer items-center justify-center rounded-2xl border px-4 py-5 text-sm font-semibold transition ${
-                          isSelected
-                            ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="installationType"
-                          value={optionId}
-                          checked={isSelected}
-                          onChange={() =>
-                            setStepTwo({ installationType: optionId })
-                          }
-                          className="sr-only"
-                          required
-                        />
-                        <span
-                          className={`mr-2 ${
-                            isSelected
-                              ? "text-slate-200"
-                              : "text-slate-400 group-hover:text-slate-500"
-                          }`}
-                        >
-                          {renderIcon(
-                            config.installationIcons[optionId],
-                            "h-5 w-5"
-                          )}
-                        </span>
-                        {config.installationLabels[optionId] ?? optionId}
-                      </label>
-                    );
-                  })}
+                  {installationCards}
                 </div>
               </div>
             ) : null}
 
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-slate-800">
-                Globale afmetingen
-              </h2>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <label className="flex flex-col gap-2 text-sm font-medium text-slate-700">
-                  Totale lengte (m)
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={stepTwo.totalLength}
-                    onChange={(event) =>
-                      setStepTwo({ totalLength: event.target.value })
-                    }
-                    placeholder="Bijv. 12"
-                    className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium text-slate-700">
-                  Totale diepte (m)
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={stepTwo.totalDepth}
-                    onChange={(event) =>
-                      setStepTwo({ totalDepth: event.target.value })
-                    }
-                    placeholder="Bijv. 4"
-                    className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-medium text-slate-700">
-                  Maximale overspanning (m)
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={stepTwo.maxSpan}
-                    onChange={(event) =>
-                      setStepTwo({ maxSpan: event.target.value })
-                    }
-                    placeholder="Bijv. 6"
-                    className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                  />
-                </label>
-              </div>
-            </div>
           </div>
         </section>
 

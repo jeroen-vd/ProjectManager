@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { loadWizardConfig } from "../../../src/lib/wizardConfigStorage";
+import {
+  loadWizardConfig,
+  saveWizardConfig,
+} from "../../../src/lib/wizardConfigStorage";
 import {
   defaultWizardConfig,
   type WizardConfig,
@@ -77,13 +80,34 @@ const jaccard = (a: string[], b: string[]) => {
   return intersection / union.size;
 };
 
-const fieldMatches = (a?: string, b?: string) => (a ?? "") === (b ?? "");
+const fieldMatches = (flowValue?: string, scopeValue?: string) =>
+  !flowValue || flowValue === scopeValue;
+
+const flowSpecificity = (scope?: FlowScope) =>
+  [scope?.categoryId, scope?.contextId, scope?.installationId].filter(Boolean)
+    .length;
 
 const matchesScope = (flow: Flow, scope: FlowScope) =>
   flow.scope?.level === scope.level &&
   fieldMatches(flow.scope?.categoryId, scope.categoryId) &&
   fieldMatches(flow.scope?.contextId, scope.contextId) &&
   fieldMatches(flow.scope?.installationId, scope.installationId);
+
+const findBestMatchingFlow = (flows: Flow[], scope: FlowScope) => {
+  let best: Flow | null = null;
+  let bestScore = -1;
+  flows.forEach((flow) => {
+    if (!matchesScope(flow, scope)) {
+      return;
+    }
+    const score = flowSpecificity(flow.scope);
+    if (score > bestScore) {
+      best = flow;
+      bestScore = score;
+    }
+  });
+  return best;
+};
 
 const questionHasOutputs = (question: Question) => {
   if ((question.outputs ?? []).length > 0) {
@@ -103,6 +127,7 @@ export default function QuestionMapPage() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const lastSavedRef = useRef<QuestionLibrary | null>(null);
   const lastManualSaveRef = useRef<QuestionLibrary | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">(
     "idle"
   );
@@ -666,6 +691,99 @@ export default function QuestionMapPage() {
     }
   };
 
+  const buildInitialScope = (nextConfig: WizardConfig) => {
+    const firstCategory = nextConfig.categories[0]?.id ?? "";
+    const firstContext = firstCategory
+      ? nextConfig.contextsByCategory[firstCategory]?.[0]?.id ?? ""
+      : "";
+    const firstInstallation = firstContext
+      ? nextConfig.installationsByContext[firstContext]?.[0] ?? ""
+      : "";
+    return {
+      categoryId: firstCategory,
+      contextId: firstContext,
+      installationId: firstInstallation,
+    };
+  };
+
+  const handleExport = () => {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      questionLibrary: library,
+      wizardConfig: config,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `wizard-backup-${dateStamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const nextLibrary =
+          parsed?.questionLibrary ?? parsed?.library ?? parsed;
+        const nextConfig = parsed?.wizardConfig ?? parsed?.config ?? null;
+        if (
+          !nextLibrary ||
+          !Array.isArray(nextLibrary.questions) ||
+          !Array.isArray(nextLibrary.flows)
+        ) {
+          alert("Import mislukt: geen geldige bibliotheek gevonden.");
+          return;
+        }
+
+        const confirmMessage = `Importeer ${nextLibrary.questions.length} vragen en ${nextLibrary.flows.length} flows? Dit overschrijft je huidige data.`;
+        if (!window.confirm(confirmMessage)) {
+          return;
+        }
+
+        if (nextConfig && typeof nextConfig === "object") {
+          saveWizardConfig(nextConfig as WizardConfig);
+          const normalizedConfig = loadWizardConfig();
+          setConfig(normalizedConfig);
+          setScope(buildInitialScope(normalizedConfig));
+          setActiveScopeIndex(0);
+        }
+
+        saveQuestionLibrary(nextLibrary as QuestionLibrary);
+        const normalizedLibrary = loadQuestionLibrary();
+
+        setLibrary(normalizedLibrary);
+        lastSavedRef.current = normalizedLibrary;
+        lastManualSaveRef.current = normalizedLibrary;
+        setSaveStatus("saved");
+        setIsDirty(false);
+        setSelectedQuestionId(normalizedLibrary.questions[0]?.id ?? null);
+        setSelectedEdgeRef(null);
+        setSearch("");
+        setStatusFilter("all");
+        setSortMode("usage");
+        setActiveScopeIndex(0);
+        setDetailsTab("question");
+      } catch {
+        alert("Import mislukt: bestand is geen geldige JSON.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const OutputEditor = ({
     outputs,
     onChange,
@@ -1158,8 +1276,9 @@ export default function QuestionMapPage() {
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {scopeSlots.map((slot, index) => {
-                      const flowForSlot = library.flows.find((item) =>
-                        matchesScope(item, slot.scope)
+                      const flowForSlot = findBestMatchingFlow(
+                        library.flows,
+                        slot.scope
                       );
                       const isActive = index === activeScopeIndex;
                       return (
@@ -1191,8 +1310,9 @@ export default function QuestionMapPage() {
                 </div>
                 <div className="space-y-4">
                   {scopeSlots.map((slot, index) => {
-                    const flow = library.flows.find((item) =>
-                      matchesScope(item, slot.scope)
+                    const flow = findBestMatchingFlow(
+                      library.flows,
+                      slot.scope
                     );
                     if (index !== activeScopeIndex) {
                       return null;
@@ -1831,29 +1951,36 @@ export default function QuestionMapPage() {
           </div>
         </section>
 
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <button
-            type="button"
-            className="h-12 rounded-2xl border border-slate-200 bg-white px-8 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
-            onClick={() => router.push("/wizard/step2-setup")}
-          >
-            Terug
-          </button>
-          <div className="flex flex-col gap-2 text-sm text-slate-500 sm:items-end">
-            <span>
-              {saveStatus === "saving"
-                ? "Opslaan..."
-                : isDirty
-                ? "Wijzigingen nog niet opgeslagen."
-                : "Alles is opgeslagen."}
-            </span>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              className="h-12 rounded-2xl border border-slate-200 bg-white px-8 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              onClick={() => router.push("/wizard/step2-setup")}
+            >
+              Terug
+            </button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
               <button
                 type="button"
                 className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
-                onClick={handleCancel}
+                onClick={handleExport}
               >
-                Annuleren
+                Exporteren
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                onClick={() => importInputRef.current?.click()}
+              >
+                Importeren
               </button>
               <button
                 type="button"
@@ -1876,6 +2003,13 @@ export default function QuestionMapPage() {
               </button>
               <button
                 type="button"
+                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                onClick={handleCancel}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
                 className="h-12 rounded-2xl bg-slate-900 px-8 text-base font-semibold text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
                 onClick={handleSave}
                 disabled={isSaving}
@@ -1884,6 +2018,13 @@ export default function QuestionMapPage() {
               </button>
             </div>
           </div>
+          <span className="text-sm text-slate-500 sm:text-right">
+            {saveStatus === "saving"
+              ? "Opslaan..."
+              : isDirty
+              ? "Wijzigingen nog niet opgeslagen."
+              : "Alles is opgeslagen."}
+          </span>
         </div>
       </main>
     </div>

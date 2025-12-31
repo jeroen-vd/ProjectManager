@@ -24,13 +24,34 @@ type FlowQuestion = {
   question: Question;
 };
 
-const fieldMatches = (a?: string, b?: string) => (a ?? "") === (b ?? "");
+const fieldMatches = (flowValue?: string, scopeValue?: string) =>
+  !flowValue || flowValue === scopeValue;
+
+const flowSpecificity = (scope?: FlowScope) =>
+  [scope?.categoryId, scope?.contextId, scope?.installationId].filter(Boolean)
+    .length;
 
 const matchesScope = (flow: Flow, scope: FlowScope) =>
   flow.scope?.level === scope.level &&
   fieldMatches(flow.scope?.categoryId, scope.categoryId) &&
   fieldMatches(flow.scope?.contextId, scope.contextId) &&
   fieldMatches(flow.scope?.installationId, scope.installationId);
+
+const findBestMatchingFlow = (flows: Flow[], scope: FlowScope) => {
+  let best: Flow | null = null;
+  let bestScore = -1;
+  flows.forEach((flow) => {
+    if (!matchesScope(flow, scope)) {
+      return;
+    }
+    const score = flowSpecificity(flow.scope);
+    if (score > bestScore) {
+      best = flow;
+      bestScore = score;
+    }
+  });
+  return best;
+};
 
 const expressionAliases: Record<string, string> = {
   finishes: "finish.method",
@@ -122,7 +143,8 @@ const formatAnswer = (value: AnswerValue) => {
 
 export default function StepThreePage() {
   const router = useRouter();
-  const { projectInfo, stepTwo, stepThree, setStepThree } = useWizard();
+  const { projectInfo, stepTwo, stepThree, setStepThree, setStepTwo } =
+    useWizard();
   const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
   const [library, setLibrary] = useState<QuestionLibrary>(
     defaultQuestionLibrary
@@ -163,64 +185,123 @@ export default function StepThreePage() {
     [library.questions]
   );
 
-  const activeFlowResult = useMemo(() => {
-    if (library.flows.length === 0) {
-      return { flow: null as Flow | null, source: "none" as const };
-    }
+  const categoryLabel =
+    config.categories.find((category) => category.id === stepTwo.projectCategory)
+      ?.label ?? stepTwo.projectCategory;
+  const contextLabel =
+    Object.values(config.contextsByCategory)
+      .flat()
+      .find((context) => context.id === stepTwo.designContext)?.label ??
+    stepTwo.designContext;
+  const installationLabel =
+    config.installationLabels[stepTwo.installationType] ??
+    stepTwo.installationType;
+  const showGlobalDimensions =
+    stepTwo.projectCategory === "fietsenstalling" ||
+    stepTwo.designContext.includes("constructie") ||
+    stepTwo.installationType.includes("constructie");
 
-    const scopes: FlowScope[] = [];
-
-    if (
-      stepTwo.projectCategory &&
-      stepTwo.designContext &&
-      stepTwo.installationType
-    ) {
-      scopes.push({
-        level: "installation",
-        categoryId: stepTwo.projectCategory,
-        contextId: stepTwo.designContext,
-        installationId: stepTwo.installationType,
-      });
-    }
-
-    if (stepTwo.projectCategory && stepTwo.designContext) {
-      scopes.push({
-        level: "context",
-        categoryId: stepTwo.projectCategory,
-        contextId: stepTwo.designContext,
-      });
-    }
-
-    if (stepTwo.projectCategory) {
-      scopes.push({
-        level: "category",
-        categoryId: stepTwo.projectCategory,
-      });
-    }
-
-    scopes.push({ level: "global" });
-
-    for (const scope of scopes) {
-      const match = library.flows.find((flow) => matchesScope(flow, scope));
-      if (match) {
-        return { flow: match, source: scope.level };
+  const scopeCandidates = useMemo(
+    () => {
+      const candidates: { label: string; scope: FlowScope }[] = [];
+      if (stepTwo.projectCategory) {
+        candidates.push({
+          label: `Categorie: ${categoryLabel || stepTwo.projectCategory}`,
+          scope: { level: "category", categoryId: stepTwo.projectCategory },
+        });
       }
-    }
+      if (stepTwo.projectCategory && stepTwo.designContext) {
+        candidates.push({
+          label: `Context: ${contextLabel || stepTwo.designContext}`,
+          scope: {
+            level: "context",
+            categoryId: stepTwo.projectCategory,
+            contextId: stepTwo.designContext,
+          },
+        });
+      }
+      if (
+        stepTwo.projectCategory &&
+        stepTwo.designContext &&
+        stepTwo.installationType
+      ) {
+        candidates.push({
+          label: `Opstelling: ${installationLabel || stepTwo.installationType}`,
+          scope: {
+            level: "installation",
+            categoryId: stepTwo.projectCategory,
+            contextId: stepTwo.designContext,
+            installationId: stepTwo.installationType,
+          },
+        });
+      }
+      candidates.push({ label: "Global", scope: { level: "global" } });
+      return candidates;
+    },
+    [
+      categoryLabel,
+      contextLabel,
+      installationLabel,
+      stepTwo.projectCategory,
+      stepTwo.designContext,
+      stepTwo.installationType,
+    ]
+  );
 
-    return {
-      flow: library.flows[0] ?? null,
-      source: "fallback" as const,
-    };
-  }, [library.flows, stepTwo]);
+  const { mergedFlows, missingFlowLabels } = useMemo(() => {
+    const byLevel = new Map<
+      FlowScope["level"],
+      { flow: Flow; label: string }
+    >();
+    scopeCandidates.forEach((candidate) => {
+      const flow = findBestMatchingFlow(library.flows, candidate.scope);
+      if (flow) {
+        byLevel.set(candidate.scope.level, { flow, label: candidate.label });
+      }
+    });
 
-  const activeFlow = activeFlowResult.flow;
-  const activeFlowSource = activeFlowResult.source;
+    const orderedLevels: FlowScope["level"][] = [
+      "global",
+      "category",
+      "context",
+      "installation",
+    ];
+    const merged = orderedLevels
+      .map((level) => byLevel.get(level))
+      .filter((item): item is { flow: Flow; label: string } => Boolean(item));
+    const missing = scopeCandidates
+      .filter((candidate) => !byLevel.has(candidate.scope.level))
+      .map((candidate) => candidate.label);
+
+    return { mergedFlows: merged, missingFlowLabels: missing };
+  }, [library.flows, scopeCandidates]);
+
+  const combinedFlow = useMemo(() => {
+    const nodes: Flow["nodes"] = [];
+    const edges: Flow["edges"] = [];
+    const seenQuestionIds = new Set<string>();
+
+    mergedFlows.forEach(({ flow }) => {
+      flow.nodes.forEach((node) => {
+        if (seenQuestionIds.has(node.questionId)) {
+          return;
+        }
+        seenQuestionIds.add(node.questionId);
+        nodes.push(node);
+      });
+      edges.push(...flow.edges);
+    });
+
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const filteredEdges = edges.filter(
+      (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)
+    );
+
+    return { nodes, edges: filteredEdges };
+  }, [mergedFlows]);
 
   const activeFlowQuestions = useMemo<FlowQuestion[]>(() => {
-    if (!activeFlow) {
-      return [];
-    }
-    return activeFlow.nodes
+    return combinedFlow.nodes
       .map((node) => {
         const question = questionMap.get(node.questionId);
         if (!question) {
@@ -229,20 +310,17 @@ export default function StepThreePage() {
         return { nodeId: node.id, question };
       })
       .filter((item): item is FlowQuestion => item !== null);
-  }, [activeFlow, questionMap]);
+  }, [combinedFlow.nodes, questionMap]);
 
   const incomingEdges = useMemo(() => {
     const map = new Map<string, Flow["edges"]>();
-    if (!activeFlow) {
-      return map;
-    }
-    activeFlow.edges.forEach((edge) => {
+    combinedFlow.edges.forEach((edge) => {
       const list = map.get(edge.to) ?? [];
       list.push(edge);
       map.set(edge.to, list);
     });
     return map;
-  }, [activeFlow]);
+  }, [combinedFlow.edges]);
 
   const visibleQuestions = useMemo(() => {
     return activeFlowQuestions.filter((item) => {
@@ -342,24 +420,7 @@ export default function StepThreePage() {
     (!requiresEn1090 || en1090Value !== null && en1090Value !== undefined) &&
     (!requiresExc || Boolean(answerMap["en1090.exc"]));
 
-  const hasScopedSelection = Boolean(
-    stepTwo.projectCategory || stepTwo.designContext || stepTwo.installationType
-  );
-  const showGlobalFallback =
-    activeFlowSource === "global" && hasScopedSelection;
-  const showFallback = activeFlowSource === "fallback";
-
-  const categoryLabel =
-    config.categories.find((category) => category.id === stepTwo.projectCategory)
-      ?.label ?? stepTwo.projectCategory;
-  const contextLabel =
-    Object.values(config.contextsByCategory)
-      .flat()
-      .find((context) => context.id === stepTwo.designContext)?.label ??
-    stepTwo.designContext;
-  const installationLabel =
-    config.installationLabels[stepTwo.installationType] ??
-    stepTwo.installationType;
+  const flowSummary = mergedFlows.map((item) => item.label).join(" + ");
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e2e8f0_100%)] px-6 py-16 text-slate-900">
@@ -387,17 +448,11 @@ export default function StepThreePage() {
                   {categoryLabel || "-"} / {contextLabel || "-"} / {installationLabel || "-"}
                 </p>
                 <p className="mt-1 text-[11px] text-slate-500">
-                  Flow: {activeFlow?.name ?? "geen flow"}
-                  {activeFlow?.scope?.level ? ` (${activeFlow.scope.level})` : ""}
+                  Flows: {flowSummary || "geen flow"}
                 </p>
-                {showGlobalFallback ? (
+                {missingFlowLabels.length > 0 ? (
                   <p className="mt-1 text-[11px] text-amber-600">
-                    Geen scope-flow gevonden. We tonen de globale flow.
-                  </p>
-                ) : null}
-                {showFallback ? (
-                  <p className="mt-1 text-[11px] text-amber-600">
-                    Geen match gevonden. We tonen de eerste flow uit de bibliotheek.
+                    Geen flow gevonden voor: {missingFlowLabels.join(", ")}.
                   </p>
                 ) : null}
               </div>
@@ -409,6 +464,55 @@ export default function StepThreePage() {
                 Flowmap openen
               </button>
             </div>
+
+            {showGlobalDimensions ? (
+              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+                <h2 className="text-lg font-semibold text-slate-800">
+                  Globale afmetingen
+                </h2>
+                <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                  <label className="flex flex-col gap-2 text-sm font-medium text-slate-700">
+                    Totale lengte (m)
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={stepTwo.totalLength}
+                      onChange={(event) =>
+                        setStepTwo({ totalLength: event.target.value })
+                      }
+                      placeholder="Bijv. 12"
+                      className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm font-medium text-slate-700">
+                    Totale diepte (m)
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={stepTwo.totalDepth}
+                      onChange={(event) =>
+                        setStepTwo({ totalDepth: event.target.value })
+                      }
+                      placeholder="Bijv. 4"
+                      className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm font-medium text-slate-700">
+                    Maximale overspanning (m)
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={stepTwo.maxSpan}
+                      onChange={(event) =>
+                        setStepTwo({ maxSpan: event.target.value })
+                      }
+                      placeholder="Bijv. 6"
+                      className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : null}
 
             {visibleQuestions.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-8 text-sm text-slate-500">
