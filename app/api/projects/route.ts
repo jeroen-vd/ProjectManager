@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { resolveProjectRoot } from "@/src/lib/projectPaths";
 
 type ProjectPayload = {
   projectNumber: string;
@@ -9,7 +10,7 @@ type ProjectPayload = {
   siteAddress: string;
 };
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = path.join(resolveProjectRoot(), "data");
 const dataFile = path.join(dataDir, "projects.json");
 
 async function readProjects() {

@@ -7,9 +7,17 @@ import {
   saveWizardConfig,
 } from "../../../src/lib/wizardConfigStorage";
 import {
+  loadQuestionLibrary,
+  saveQuestionLibrary,
+} from "../../../src/lib/questionLibraryStorage";
+import {
   defaultWizardConfig,
   type WizardConfig,
 } from "../../../src/config/wizardConfig.default";
+import { type QuestionLibrary } from "../../../src/config/questionLibrary.default";
+import CenteredPopup from "../CenteredPopup";
+import TemplateRevisionsPanel from "../TemplateRevisionsPanel";
+import { useCenteredPopup } from "../useCenteredPopup";
 
 type Option = { id: string; label: string; iconKey?: string };
 
@@ -207,6 +215,7 @@ const uniqueId = (base: string, existing: string[]) => {
 
 export default function Step2SetupPage() {
   const router = useRouter();
+  const { popup, notify, close } = useCenteredPopup("Melding");
   const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
   const [selectedCategoryId, setSelectedCategoryId] = useState(
     config.categories[0]?.id ?? ""
@@ -451,7 +460,7 @@ export default function Step2SetupPage() {
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
         const reason = payload?.error || "Resetten mislukt.";
-        alert(reason);
+        notify(reason, { tone: "error", title: "Resetten mislukt" });
         return;
       }
       const nextConfig = (await response.json()) as WizardConfig;
@@ -465,7 +474,7 @@ export default function Step2SetupPage() {
       setInstallationDraftLabel("");
     } catch (error) {
       console.error("Resetten mislukt.", error);
-      alert("Resetten mislukt.");
+      notify("Resetten mislukt.", { tone: "error", title: "Resetten mislukt" });
     } finally {
       setIsResettingTemplate(false);
     }
@@ -474,24 +483,57 @@ export default function Step2SetupPage() {
   const handleOverwriteDefault = async () => {
     try {
       setIsSavingTemplate(true);
+      const library = loadQuestionLibrary();
       const response = await fetch("/api/wizard-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ ...config, questionLibrary: library }),
       });
+      const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const payload = await response.json().catch(() => null);
         const reason = payload?.error || "Opslaan mislukt.";
-        alert(reason);
+        notify(reason, { tone: "error", title: "Opslaan mislukt" });
         return;
       }
-      alert("Template opgeslagen.");
+      if (payload?.revisionOk === false) {
+        notify("Template opgeslagen, maar revisie opslaan mislukt.", {
+          tone: "warning",
+          title: "Let op",
+        });
+        return;
+      }
+      notify("Template opgeslagen.", { tone: "success", title: "Opgeslagen" });
     } catch (error) {
       console.error("Template opslaan mislukt.", error);
-      alert("Template opslaan mislukt.");
+      notify("Template opslaan mislukt.", {
+        tone: "error",
+        title: "Opslaan mislukt",
+      });
     } finally {
       setIsSavingTemplate(false);
     }
+  };
+
+  const handleRestoreRevision = (payload: {
+    wizardConfig: WizardConfig;
+    questionLibrary: QuestionLibrary;
+  }) => {
+    const nextConfig = payload.wizardConfig;
+    const nextLibrary = payload.questionLibrary;
+    const nextCategoryId = nextConfig.categories[0]?.id ?? "";
+    const nextContextId = nextCategoryId
+      ? nextConfig.contextsByCategory[nextCategoryId]?.[0]?.id ?? ""
+      : "";
+
+    saveWizardConfig(nextConfig);
+    saveQuestionLibrary(nextLibrary);
+    setConfig(nextConfig);
+    setSelectedCategoryId(nextCategoryId);
+    setSelectedContextId(nextContextId);
+    setShowContextDraft(false);
+    setContextDraftLabel("");
+    setShowInstallationDraft(false);
+    setInstallationDraftLabel("");
   };
 
   return (
@@ -839,6 +881,11 @@ export default function Step2SetupPage() {
   </div>
 </section>
 
+        <TemplateRevisionsPanel
+          onRestore={handleRestoreRevision}
+          onNotify={notify}
+        />
+
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <button
@@ -884,6 +931,7 @@ export default function Step2SetupPage() {
           </div>
         </div>
       </main>
+      <CenteredPopup popup={popup} onClose={close} />
     </div>
   );
 }

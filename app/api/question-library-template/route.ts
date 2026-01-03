@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import {
   defaultQuestionLibrary,
   type QuestionLibrary,
 } from "@/src/config/questionLibrary.default";
+import {
+  defaultWizardConfig,
+  type WizardConfig,
+} from "@/src/config/wizardConfig.default";
+import { writeQuestionLibraryTemplate } from "@/src/lib/templateFileStorage";
+import { appendTemplateRevision } from "@/src/lib/templateRevisionStorage";
 
 export const runtime = "nodejs";
 
-type PartialLibrary = Partial<QuestionLibrary>;
+type QuestionLibraryPayload = Partial<QuestionLibrary> & {
+  wizardConfig?: WizardConfig;
+  revisionNote?: string;
+};
 
 const normalizeLibrary = (raw: PartialLibrary | null): QuestionLibrary => {
   if (!raw) {
@@ -57,9 +64,9 @@ const normalizeLibrary = (raw: PartialLibrary | null): QuestionLibrary => {
 };
 
 export async function POST(request: Request) {
-  let payload: PartialLibrary | null = null;
+  let payload: QuestionLibraryPayload | null = null;
   try {
-    payload = (await request.json()) as PartialLibrary;
+    payload = (await request.json()) as QuestionLibraryPayload;
   } catch {
     return NextResponse.json(
       { error: "Ongeldige JSON payload." },
@@ -68,31 +75,11 @@ export async function POST(request: Request) {
   }
 
   const nextLibrary = normalizeLibrary(payload);
-  const filePath = path.join(
-    process.cwd(),
-    "src",
-    "config",
-    "questionLibrary.default.ts"
-  );
+  const revisionNote =
+    typeof payload?.revisionNote === "string" ? payload.revisionNote.trim() : "";
 
   try {
-    const file = await fs.readFile(filePath, "utf8");
-    const marker = "export const defaultQuestionLibrary: QuestionLibrary =";
-    const markerIndex = file.indexOf(marker);
-    if (markerIndex === -1) {
-      return NextResponse.json(
-        { error: "Kan default template niet vinden om te overschrijven." },
-        { status: 500 }
-      );
-    }
-
-    const newContent = `${file.slice(0, markerIndex)}${marker}\n${JSON.stringify(
-      nextLibrary,
-      null,
-      2
-    )};\n`;
-
-    await fs.writeFile(filePath, newContent, "utf8");
+    await writeQuestionLibraryTemplate(nextLibrary);
   } catch (error) {
     console.error("Template opslaan mislukt.", error);
     return NextResponse.json(
@@ -101,5 +88,18 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true });
+  let revisionOk = true;
+  try {
+    await appendTemplateRevision({
+      source: "question-library-template",
+      wizardConfig: payload?.wizardConfig ?? defaultWizardConfig,
+      questionLibrary: nextLibrary,
+      ...(revisionNote ? { note: revisionNote } : {}),
+    });
+  } catch (error) {
+    revisionOk = false;
+    console.error("Revisie opslaan mislukt.", error);
+  }
+
+  return NextResponse.json({ ok: true, revisionOk });
 }

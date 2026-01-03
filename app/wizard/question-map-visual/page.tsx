@@ -41,9 +41,11 @@ import {
 } from "../../../src/config/questionLibrary.default";
 import {
   loadQuestionLibrary,
-  resetQuestionLibrary,
   saveQuestionLibrary,
 } from "../../../src/lib/questionLibraryStorage";
+import CenteredPopup from "../CenteredPopup";
+import TemplateRevisionsPanel from "../TemplateRevisionsPanel";
+import { useCenteredPopup, type PopupState } from "../useCenteredPopup";
 
 type QuestionNodeData = {
   label: string;
@@ -234,6 +236,11 @@ const questionHasOutputs = (question: Question) => {
   );
 };
 
+type ConfirmState = PopupState & {
+  confirmLabel: string;
+  onConfirm: () => void;
+};
+
 const buildDefaultPosition = (index: number) => ({
   x: 80 + (index % 2) * 260,
   y: 80 + Math.floor(index / 2) * 160,
@@ -241,6 +248,8 @@ const buildDefaultPosition = (index: number) => ({
 
 export default function QuestionMapVisualPage() {
   const router = useRouter();
+  const { popup, notify, close } = useCenteredPopup("Melding");
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
   const [library, setLibrary] = useState<QuestionLibrary>(
     defaultQuestionLibrary
@@ -275,7 +284,6 @@ export default function QuestionMapVisualPage() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">(
     "idle"
@@ -289,6 +297,7 @@ export default function QuestionMapVisualPage() {
   const [showNodeOrder, setShowNodeOrder] = useState(true);
   const [showConditions, setShowConditions] = useState(false);
   const [isCanvasExpanded, setIsCanvasExpanded] = useState(false);
+  const [showLibraryOverlay, setShowLibraryOverlay] = useState(false);
   const [edgeDraft, setEdgeDraft] = useState({
     from: "",
     to: "",
@@ -333,6 +342,12 @@ export default function QuestionMapVisualPage() {
       CANVAS_SIZE_STORAGE_KEY,
       isCanvasExpanded ? "expanded" : "normal"
     );
+  }, [isCanvasExpanded]);
+
+  useEffect(() => {
+    if (!isCanvasExpanded) {
+      setShowLibraryOverlay(false);
+    }
   }, [isCanvasExpanded]);
 
   useEffect(() => {
@@ -896,6 +911,42 @@ export default function QuestionMapVisualPage() {
     }));
   };
 
+  const removeQuestion = (questionId: string) => {
+    setLibrary((prev) => ({
+      ...prev,
+      questions: prev.questions.filter((question) => question.id !== questionId),
+      flows: prev.flows.map((flow) => {
+        const remainingNodes = flow.nodes.filter(
+          (node) => node.questionId !== questionId
+        );
+        const nodeIds = new Set(remainingNodes.map((node) => node.id));
+        return {
+          ...flow,
+          nodes: remainingNodes,
+          edges: flow.edges.filter(
+            (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)
+          ),
+        };
+      }),
+    }));
+    if (selectedQuestionId === questionId) {
+      setSelectedQuestionId(null);
+    }
+  };
+
+  const requestDeleteQuestion = (questionId: string) => {
+    setConfirmState({
+      title: "Vraag verwijderen",
+      message: "Deze vraag verwijderen? Dit kan niet ongedaan worden gemaakt.",
+      tone: "error",
+      confirmLabel: "Verwijderen",
+      onConfirm: () => {
+        setConfirmState(null);
+        removeQuestion(questionId);
+      },
+    });
+  };
+
   const addOption = (question: Question) => {
     const options = question.options ?? [];
     const nextOption: AnswerOption = {
@@ -1095,44 +1146,6 @@ export default function QuestionMapVisualPage() {
     setIsSaving(false);
   };
 
-  const handleReset = () => {
-    setIsResetting(true);
-    resetQuestionLibrary();
-    setLibrary(defaultQuestionLibrary);
-    lastLibraryRef.current = defaultQuestionLibrary;
-    lastSavedRef.current = defaultQuestionLibrary;
-    lastManualSaveRef.current = defaultQuestionLibrary;
-    historyRef.current = { past: [], future: [] };
-    setCanUndo(false);
-    setCanRedo(false);
-    setSaveStatus("saved");
-    setIsDirty(false);
-    setSelectedQuestionId(null);
-    setSelectedNodeId(null);
-    setSelectedEdgeId(null);
-    setSearch("");
-    setActiveScopeIndex(0);
-    setIsResetting(false);
-  };
-
-  const handleCancel = () => {
-    const fallback = loadQuestionLibrary();
-    const snapshot = lastManualSaveRef.current ?? fallback;
-    isRestoringRef.current = true;
-    historyRef.current = { past: [], future: [] };
-    setCanUndo(false);
-    setCanRedo(false);
-    setLibrary(snapshot);
-    lastLibraryRef.current = snapshot;
-    lastSavedRef.current = snapshot;
-    setSaveStatus("saved");
-    setIsDirty(false);
-    setSelectedQuestionId(null);
-    setSelectedNodeId(null);
-    setSelectedEdgeId(null);
-    setEdgeDraft({ from: "", to: "", expression: "" });
-  };
-
   const handleUndo = useCallback(() => {
     const past = historyRef.current.past;
     if (past.length === 0) {
@@ -1169,27 +1182,84 @@ export default function QuestionMapVisualPage() {
     setCanRedo(historyRef.current.future.length > 0);
   }, [library]);
 
-  const handleOverwriteDefault = async () => {
+  const handleOverwriteDefault = async (note?: string) => {
     try {
       setIsSavingTemplate(true);
+      const revisionNote = note?.trim();
+      const requestPayload = {
+        ...library,
+        wizardConfig: config,
+        ...(revisionNote ? { revisionNote } : {}),
+      };
       const response = await fetch("/api/question-library-template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(library),
+        body: JSON.stringify(requestPayload),
       });
+      const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const payload = await response.json().catch(() => null);
         const reason = payload?.error || "Opslaan mislukt.";
-        alert(reason);
+        notify(reason, { tone: "error", title: "Opslaan mislukt" });
         return;
       }
-      alert("Template opgeslagen.");
+      if (payload?.revisionOk === false) {
+        notify("Template opgeslagen, maar revisie opslaan mislukt.", {
+          tone: "warning",
+          title: "Let op",
+        });
+        return;
+      }
+      notify("Template opgeslagen.", { tone: "success", title: "Opgeslagen" });
     } catch (error) {
       console.error("Template opslaan mislukt.", error);
-      alert("Template opslaan mislukt.");
+      notify("Template opslaan mislukt.", {
+        tone: "error",
+        title: "Opslaan mislukt",
+      });
     } finally {
       setIsSavingTemplate(false);
     }
+  };
+
+  const handleRestoreRevision = (payload: {
+    wizardConfig: WizardConfig;
+    questionLibrary: QuestionLibrary;
+  }) => {
+    const nextConfig = payload.wizardConfig;
+    const nextLibrary = payload.questionLibrary;
+
+    const firstCategory = nextConfig.categories[0]?.id ?? "";
+    const firstContext = firstCategory
+      ? nextConfig.contextsByCategory[firstCategory]?.[0]?.id ?? ""
+      : "";
+    const firstInstallation = firstContext
+      ? nextConfig.installationsByContext[firstContext]?.[0] ?? ""
+      : "";
+
+    saveWizardConfig(nextConfig);
+    saveQuestionLibrary(nextLibrary);
+    setConfig(nextConfig);
+    isRestoringRef.current = true;
+    historyRef.current = { past: [], future: [] };
+    setCanUndo(false);
+    setCanRedo(false);
+    lastLibraryRef.current = nextLibrary;
+    lastSavedRef.current = nextLibrary;
+    lastManualSaveRef.current = nextLibrary;
+    setLibrary(nextLibrary);
+    setSaveStatus("saved");
+    setIsDirty(false);
+    setSelectedQuestionId(null);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setEdgeDraft({ from: "", to: "", expression: "" });
+    setSearch("");
+    setActiveScopeIndex(0);
+    setScope({
+      categoryId: firstCategory,
+      contextId: firstContext,
+      installationId: firstInstallation,
+    });
   };
 
   const buildInitialScope = (nextConfig: WizardConfig) => {
@@ -1205,27 +1275,6 @@ export default function QuestionMapVisualPage() {
       contextId: firstContext,
       installationId: firstInstallation,
     };
-  };
-
-  const handleExport = () => {
-    const payload = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      questionLibrary: library,
-      wizardConfig: config,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const dateStamp = new Date().toISOString().slice(0, 10);
-    link.href = url;
-    link.download = `wizard-backup-${dateStamp}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
   };
 
   const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1246,7 +1295,10 @@ export default function QuestionMapVisualPage() {
           !Array.isArray(nextLibrary.questions) ||
           !Array.isArray(nextLibrary.flows)
         ) {
-          alert("Import mislukt: geen geldige bibliotheek gevonden.");
+          notify("Import mislukt: geen geldige bibliotheek gevonden.", {
+            tone: "error",
+            title: "Import mislukt",
+          });
           return;
         }
 
@@ -1281,7 +1333,10 @@ export default function QuestionMapVisualPage() {
         setSelectedEdgeId(null);
         setEdgeDraft({ from: "", to: "", expression: "" });
       } catch {
-        alert("Import mislukt: bestand is geen geldige JSON.");
+        notify("Import mislukt: bestand is geen geldige JSON.", {
+          tone: "error",
+          title: "Import mislukt",
+        });
       }
     };
     reader.readAsText(file);
@@ -1686,14 +1741,101 @@ export default function QuestionMapVisualPage() {
     setSelectedEdgeId(null);
   }, []);
 
-  const handleSelectQuestion = useCallback((questionId: string) => {
-    setSelectedQuestionId(questionId);
-    setSelectedEdgeId(null);
-    const flowNodeId =
-      activeFlow?.nodes.find((node) => node.questionId === questionId)?.id ??
-      null;
-    setSelectedNodeId(flowNodeId);
-  }, [activeFlow]);
+  const handleSelectQuestion = useCallback(
+    (questionId: string) => {
+      if (questionId === selectedQuestionId) {
+        setSelectedQuestionId(null);
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        return;
+      }
+      setSelectedQuestionId(questionId);
+      setSelectedEdgeId(null);
+      const flowNodeId =
+        activeFlow?.nodes.find((node) => node.questionId === questionId)?.id ??
+        null;
+      setSelectedNodeId(flowNodeId);
+    },
+    [activeFlow, selectedQuestionId]
+  );
+
+  const libraryItems = filteredQuestions.map((question) => {
+    const isSelected = question.id === selectedQuestionId;
+    const isInFlow = flowQuestionIds.has(question.id);
+    const canDelete = (usageMap.get(question.id) ?? 0) === 0;
+    return (
+      <div
+        key={question.id}
+        className={`relative rounded-2xl border px-3 py-2 text-xs transition ${
+          isSelected
+            ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
+            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            requestDeleteQuestion(question.id);
+          }}
+          disabled={!canDelete}
+          title={
+            canDelete
+              ? "Vraag verwijderen"
+              : "Vraag is gekoppeld aan een flow"
+          }
+          aria-label="Vraag verwijderen"
+          className="absolute right-2 top-2 z-10 rounded-full border border-rose-200 bg-rose-50 p-1 text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <svg viewBox="0 0 24 24" className="h-3 w-3" aria-hidden="true">
+            <path
+              d="M4 7 H20 M9 7 V5 H15 V7 M7 7 L8 20 H16 L17 7"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleSelectQuestion(question.id)}
+          className="w-full text-left pr-6"
+        >
+          <p className="text-sm font-semibold">
+            {question.prompt}
+          </p>
+          <p
+            className={`text-[11px] ${
+              isSelected ? "text-slate-200" : "text-slate-500"
+            }`}
+          >
+            {question.conceptKey}
+          </p>
+        </button>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+              isInFlow
+                ? "bg-emerald-100 text-emerald-700"
+                : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {isInFlow ? "in flow" : "niet gekoppeld"}
+          </span>
+          <button
+            type="button"
+            onClick={() => handleAddToActiveFlow(question.id)}
+            disabled={!activeSlot || isInFlow}
+            className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+          >
+            + toevoegen
+          </button>
+        </div>
+      </div>
+    );
+  });
 
   const nodeTypes = useMemo(() => ({ questionNode: QuestionNode }), []);
   const fitViewOptions = useMemo(() => ({ padding: 0.2 }), []);
@@ -1771,20 +1913,29 @@ export default function QuestionMapVisualPage() {
               Wizard setup
             </p>
             <h1 className="text-4xl font-semibold leading-tight">
-              Visuele flowmap
+              Vraagdiagram & bibliotheek
             </h1>
             <p className="text-base text-slate-600">
               Bekijk relaties als een netwerk en pas de flow direct aan.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => router.push("/wizard/question-map")}
-              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-            >
-              Lijstweergave
-            </button>
+          <div className="flex flex-wrap">
+            <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => router.push("/wizard/question-map")}
+                className="rounded-full px-4 py-2 text-sm font-semibold text-slate-600 transition hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              >
+                Lijstweergave
+              </button>
+              <button
+                type="button"
+                aria-current="page"
+                className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow transition focus:outline-none focus:ring-2 focus:ring-slate-300"
+              >
+                Visuele map
+              </button>
+            </div>
           </div>
         </header>
 
@@ -1887,85 +2038,39 @@ export default function QuestionMapVisualPage() {
 
             <div className="grid gap-6 lg:grid-cols-12">
               <div
-                className={`space-y-4 lg:col-span-3 ${
+                className={`space-y-3 lg:col-span-2 ${
                   isCanvasExpanded ? "lg:hidden" : ""
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                     Vraagbibliotheek
                   </h2>
+                </div>
+                <div className="space-y-2">
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Zoek op vraag, key, tag"
+                    className="h-9 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  />
                   <button
                     type="button"
                     onClick={createQuestion}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50"
                   >
-                    + nieuwe vraag
+                    <span className="text-sm leading-none">+</span>
+                    <span className="whitespace-nowrap">Nieuwe vraag</span>
                   </button>
                 </div>
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Zoek op vraag, key, tag"
-                  className="h-10 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                />
                 <div className="space-y-2">
-                  {filteredQuestions.map((question) => {
-                    const isSelected = question.id === selectedQuestionId;
-                    const isInFlow = flowQuestionIds.has(question.id);
-                    return (
-                      <div
-                        key={question.id}
-                        className={`rounded-2xl border px-3 py-3 text-xs transition ${
-                          isSelected
-                            ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleSelectQuestion(question.id)}
-                          className="w-full text-left"
-                        >
-                          <p className="text-sm font-semibold">
-                            {question.prompt}
-                          </p>
-                          <p
-                            className={`text-[11px] ${
-                              isSelected ? "text-slate-200" : "text-slate-500"
-                            }`}
-                          >
-                            {question.conceptKey}
-                          </p>
-                        </button>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                              isInFlow
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
-                            {isInFlow ? "in flow" : "niet gekoppeld"}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleAddToActiveFlow(question.id)}
-                            disabled={!activeSlot || isInFlow}
-                            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
-                          >
-                            + toevoegen
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {libraryItems}
                 </div>
               </div>
 
               <div
                 className={`space-y-4 ${
-                  isCanvasExpanded ? "lg:col-span-12" : "lg:col-span-6"
+                  isCanvasExpanded ? "lg:col-span-12" : "lg:col-span-7"
                 }`}
               >
                 <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 text-xs text-slate-600 shadow-sm">
@@ -2224,6 +2329,24 @@ export default function QuestionMapVisualPage() {
                           >
                             Passend
                           </button>
+                          {isCanvasExpanded ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowLibraryOverlay((prev) => !prev)
+                              }
+                              className={`hidden rounded-full border px-3 py-1 text-[11px] font-semibold transition lg:inline-flex ${
+                                showLibraryOverlay
+                                  ? "border-slate-900 bg-slate-900 text-white"
+                                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                              }`}
+                              title="Vraagbibliotheek"
+                            >
+                              {showLibraryOverlay
+                                ? "Bibliotheek sluiten"
+                                : "Bibliotheek"}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() =>
@@ -2254,6 +2377,45 @@ export default function QuestionMapVisualPage() {
                           isCanvasExpanded ? "h-[75vh]" : "h-[560px]"
                         }`}
                       >
+                        {isCanvasExpanded && showLibraryOverlay ? (
+                          <div className="pointer-events-auto absolute left-4 top-4 bottom-4 z-20 hidden w-72 flex-col rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur lg:flex">
+                            <div className="flex h-full flex-col gap-2">
+                              <div className="flex items-center justify-between">
+                                <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                                  Vraagbibliotheek
+                                </h2>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowLibraryOverlay(false)}
+                                  className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
+                                >
+                                  Sluiten
+                                </button>
+                              </div>
+                              <div className="space-y-2">
+                                <input
+                                  value={search}
+                                  onChange={(event) =>
+                                    setSearch(event.target.value)
+                                  }
+                                  placeholder="Zoek op vraag, key, tag"
+                                  className="h-9 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={createQuestion}
+                                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50"
+                                >
+                                  <span className="text-sm leading-none">+</span>
+                                  <span className="whitespace-nowrap">Nieuwe vraag</span>
+                                </button>
+                              </div>
+                              <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+                                {libraryItems}
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
                         <ReactFlow
                           nodes={nodes}
                           edges={edges}
@@ -2952,6 +3114,14 @@ export default function QuestionMapVisualPage() {
           </div>
         </section>
 
+        <TemplateRevisionsPanel
+          onRestore={handleRestoreRevision}
+          onNotify={notify}
+          onCreateRevision={handleOverwriteDefault}
+          isCreatingRevision={isSavingTemplate}
+          createLabel="Template revisie aanmaken"
+        />
+
         <div className="flex flex-col gap-2">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <button
@@ -2972,42 +3142,9 @@ export default function QuestionMapVisualPage() {
               <button
                 type="button"
                 className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
-                onClick={handleExport}
-              >
-                Exporteren
-              </button>
-              <button
-                type="button"
-                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
                 onClick={() => importInputRef.current?.click()}
               >
-                Importeren
-              </button>
-              <button
-                type="button"
-                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
-                onClick={handleReset}
-                disabled={isResetting}
-              >
-                {isResetting ? "Resetten..." : "Reset bibliotheek"}
-              </button>
-              <button
-                type="button"
-                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:opacity-60"
-                onClick={handleOverwriteDefault}
-                title="Sla de huidige bibliotheek op als standaard template."
-                disabled={isSavingTemplate}
-              >
-                {isSavingTemplate
-                  ? "Opslaan..."
-                  : "Standaard template overschrijven"}
-              </button>
-              <button
-                type="button"
-                className="h-12 rounded-2xl border border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
-                onClick={handleCancel}
-              >
-                Annuleren
+                Template importeren
               </button>
               <button
                 type="button"
@@ -3028,6 +3165,36 @@ export default function QuestionMapVisualPage() {
           </span>
         </div>
       </main>
+      <CenteredPopup
+        popup={confirmState ?? popup}
+        onClose={() => {
+          if (confirmState) {
+            setConfirmState(null);
+            return;
+          }
+          close();
+        }}
+        actions={
+          confirmState ? (
+            <>
+              <button
+                type="button"
+                className="h-10 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                onClick={() => setConfirmState(null)}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                className="h-10 rounded-2xl bg-rose-600 px-4 text-sm font-semibold text-white shadow-lg shadow-rose-200 transition hover:-translate-y-0.5 hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-200"
+                onClick={confirmState.onConfirm}
+              >
+                {confirmState.confirmLabel}
+              </button>
+            </>
+          ) : null
+        }
+      />
     </div>
   );
 }

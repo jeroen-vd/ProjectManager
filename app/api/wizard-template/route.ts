@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import {
   defaultWizardConfig,
   type WizardConfig,
 } from "@/src/config/wizardConfig.default";
+import {
+  defaultQuestionLibrary,
+  type QuestionLibrary,
+} from "@/src/config/questionLibrary.default";
+import { writeWizardConfigTemplate } from "@/src/lib/templateFileStorage";
+import { appendTemplateRevision } from "@/src/lib/templateRevisionStorage";
 
 export const runtime = "nodejs";
 
-type PartialConfig = Partial<WizardConfig>;
+type WizardTemplatePayload = Partial<WizardConfig> & {
+  questionLibrary?: QuestionLibrary;
+  revisionNote?: string;
+};
 
 const buildDefaultContextIconMap = () => {
   const entries = Object.values(defaultWizardConfig.contextsByCategory).flat();
@@ -79,9 +86,9 @@ const normalizeConfig = (raw: PartialConfig | null): WizardConfig => {
 };
 
 export async function POST(request: Request) {
-  let payload: PartialConfig | null = null;
+  let payload: WizardTemplatePayload | null = null;
   try {
-    payload = (await request.json()) as PartialConfig;
+    payload = (await request.json()) as WizardTemplatePayload;
   } catch {
     return NextResponse.json(
       { error: "Ongeldige JSON payload." },
@@ -90,31 +97,11 @@ export async function POST(request: Request) {
   }
 
   const nextConfig = normalizeConfig(payload);
-  const filePath = path.join(
-    process.cwd(),
-    "src",
-    "config",
-    "wizardConfig.default.ts"
-  );
+  const revisionNote =
+    typeof payload?.revisionNote === "string" ? payload.revisionNote.trim() : "";
 
   try {
-    const file = await fs.readFile(filePath, "utf8");
-    const marker = "export const defaultWizardConfig: WizardConfig =";
-    const markerIndex = file.indexOf(marker);
-    if (markerIndex === -1) {
-      return NextResponse.json(
-        { error: "Kan default template niet vinden om te overschrijven." },
-        { status: 500 }
-      );
-    }
-
-    const newContent = `${file.slice(0, markerIndex)}${marker}\n${JSON.stringify(
-      nextConfig,
-      null,
-      2
-    )};\n`;
-
-    await fs.writeFile(filePath, newContent, "utf8");
+    await writeWizardConfigTemplate(nextConfig);
   } catch (error) {
     console.error("Template opslaan mislukt.", error);
     return NextResponse.json(
@@ -123,7 +110,20 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true });
+  let revisionOk = true;
+  try {
+    await appendTemplateRevision({
+      source: "wizard-template",
+      wizardConfig: nextConfig,
+      questionLibrary: payload?.questionLibrary ?? defaultQuestionLibrary,
+      ...(revisionNote ? { note: revisionNote } : {}),
+    });
+  } catch (error) {
+    revisionOk = false;
+    console.error("Revisie opslaan mislukt.", error);
+  }
+
+  return NextResponse.json({ ok: true, revisionOk });
 }
 
 export async function GET() {
