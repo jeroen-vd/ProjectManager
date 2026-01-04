@@ -238,10 +238,14 @@ export default function Step2SetupPage() {
     );
   }, []);
 
-  const contextsForCategory =
-    config.contextsByCategory[selectedCategoryId] ?? [];
-  const installationsForContext =
-    config.installationsByContext[selectedContextId] ?? [];
+  const contextsForCategory = useMemo(
+    () => config.contextsByCategory[selectedCategoryId] ?? [],
+    [config.contextsByCategory, selectedCategoryId]
+  );
+  const installationsForContext = useMemo(
+    () => config.installationsByContext[selectedContextId] ?? [],
+    [config.installationsByContext, selectedContextId]
+  );
 
   const availableInstallations = useMemo(
     () =>

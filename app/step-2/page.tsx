@@ -4,10 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 import { useRouter } from "next/navigation";
 import { useWizard } from "../wizard/WizardContext";
 import { loadWizardConfig } from "../../src/lib/wizardConfigStorage";
-import {
-  defaultWizardConfig,
-  type WizardConfig,
-} from "../../src/config/wizardConfig.default";
+import { type WizardConfig } from "../../src/config/wizardConfig.default";
 import WizardStepIndicator from "../wizard/WizardStepIndicator";
 
 const iconMap: Record<string, (className: string) => ReactElement> = {
@@ -159,11 +156,7 @@ const renderIcon = (iconKey: string | undefined, className: string) => {
 export default function StepTwoPage() {
   const router = useRouter();
   const { projectInfo, stepTwo, setStepTwo } = useWizard();
-  const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
-
-  useEffect(() => {
-    setConfig(loadWizardConfig());
-  }, []);
+  const [config] = useState<WizardConfig>(() => loadWizardConfig());
 
   useEffect(() => {
     const categoryExists = config.categories.some(
@@ -214,8 +207,10 @@ export default function StepTwoPage() {
   const hasProjectInfo = Object.values(projectInfo).every(
     (value) => value.trim().length > 0
   );
-  const availableContexts =
-    config.contextsByCategory[stepTwo.projectCategory] || [];
+  const availableContexts = useMemo(
+    () => config.contextsByCategory[stepTwo.projectCategory] ?? [],
+    [config.contextsByCategory, stepTwo.projectCategory]
+  );
   const showInstallation =
     stepTwo.designContext.trim().length > 0 &&
     config.installationsByContext[stepTwo.designContext] !== undefined;

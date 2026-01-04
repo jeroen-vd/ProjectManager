@@ -40,11 +40,21 @@ const normalizeLibrary = (raw: QuestionLibrary | null): QuestionLibrary => {
           (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)
         )
       : [];
+    const excludedQuestionIds = Array.from(
+      new Set(
+        Array.isArray(flow.excludedQuestionIds)
+          ? flow.excludedQuestionIds.filter((questionId) =>
+              questionIds.has(questionId)
+            )
+          : []
+      )
+    );
     return {
       ...flow,
       scope: flow.scope ?? { level: "global" },
       nodes,
       edges,
+      excludedQuestionIds,
     };
   });
 

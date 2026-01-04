@@ -34,6 +34,7 @@ import {
   type AnswerOption,
   type Flow,
   type FlowEdge,
+  type FlowNode,
   type FlowScope,
   type Question,
   type QuestionLibrary,
@@ -50,8 +51,12 @@ import { useCenteredPopup, type PopupState } from "../useCenteredPopup";
 type QuestionNodeData = {
   label: string;
   conceptKey: string;
+  questionId: string;
+  scopeLabel?: string;
   order?: number;
   showOrder?: boolean;
+  isLocked?: boolean;
+  isGhost?: boolean;
   flags: {
     duplicate: boolean;
     missingOutputs: boolean;
@@ -60,103 +65,125 @@ type QuestionNodeData = {
   };
 };
 
-const handleStyle = {
-  width: 14,
-  height: 14,
-  background: "#0f172a",
-  border: "2px solid #ffffff",
-};
-
 const HELP_STORAGE_KEY = "question-map-visual-help";
 const CANVAS_SIZE_STORAGE_KEY = "question-map-visual-canvas-size";
+const FLOW_LEVELS: FlowScope["level"][] = [
+  "global",
+  "category",
+  "context",
+  "installation",
+];
 
-const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => (
-  <div
-    className={`min-w-[180px] rounded-2xl border px-3 py-2 text-xs shadow-sm ${
-      selected
-        ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
-        : "border-slate-200 bg-white text-slate-700"
-    }`}
-  >
-    <Handle
-      type="target"
-      position={Position.Top}
-      style={handleStyle}
-    />
-    <div className="flex items-start justify-between gap-2">
-      <p className="text-sm font-semibold">{data.label}</p>
-      {data.showOrder && data.order ? (
-        <span
-          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-            selected
-              ? "border-slate-600 bg-slate-800 text-slate-200"
-              : "border-slate-200 bg-white text-slate-500"
-          }`}
-        >
-          {data.order}
-        </span>
-      ) : null}
-    </div>
-    <p
-      className={`text-[11px] ${
-        selected ? "text-slate-300" : "text-slate-500"
+const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
+  const isGhost = Boolean(data.isGhost);
+  const isLocked = Boolean(data.isLocked) || isGhost;
+  const handleStyle = {
+    width: 14,
+    height: 14,
+    background: isGhost ? "#cbd5e1" : isLocked ? "#94a3b8" : "#0f172a",
+    border: "2px solid #ffffff",
+    opacity: isGhost ? 0.4 : isLocked ? 0.6 : 1,
+  };
+  const containerClass = isGhost
+    ? "border-slate-200 bg-slate-100 text-slate-500"
+    : isLocked
+    ? selected
+      ? "border-slate-400 bg-slate-200 text-slate-700 shadow"
+      : "border-slate-200 bg-slate-50 text-slate-500"
+    : selected
+    ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
+    : "border-slate-200 bg-white text-slate-700";
+  return (
+    <div
+      className={`min-w-[180px] rounded-2xl border px-3 py-2 text-xs shadow-sm ${containerClass} ${
+        isGhost ? "border-dashed opacity-80" : isLocked ? "opacity-90" : ""
       }`}
     >
-      {data.conceptKey}
-    </p>
-    <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
-      {data.flags.conditional ? (
-        <span
-          className={`rounded-full px-2 py-0.5 font-semibold ${
-            selected
-              ? "bg-sky-500/30 text-sky-100"
-              : "bg-sky-100 text-sky-700"
-          }`}
-        >
-          voorwaardelijk
-        </span>
-      ) : null}
-      {data.flags.duplicate ? (
-        <span
-          className={`rounded-full px-2 py-0.5 font-semibold ${
-            selected
-              ? "bg-rose-500/30 text-rose-100"
-              : "bg-rose-100 text-rose-700"
-          }`}
-        >
-          dup
-        </span>
-      ) : null}
-      {data.flags.missingOutputs ? (
-        <span
-          className={`rounded-full px-2 py-0.5 font-semibold ${
-            selected
-              ? "bg-amber-500/30 text-amber-100"
-              : "bg-amber-100 text-amber-700"
-          }`}
-        >
-          geen outputs
-        </span>
-      ) : null}
-      {data.flags.orphan ? (
-        <span
-          className={`rounded-full px-2 py-0.5 font-semibold ${
-            selected
-              ? "bg-slate-500/30 text-slate-100"
-              : "bg-slate-100 text-slate-600"
-          }`}
-        >
-          los
-        </span>
-      ) : null}
+      <Handle type="target" position={Position.Top} style={handleStyle} />
+      <div className="flex items-start justify-between gap-2">
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">{data.label}</p>
+          {data.scopeLabel ? (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                isGhost
+                  ? "border-slate-200 bg-slate-100 text-slate-500"
+                  : "border-slate-200 bg-white text-slate-500"
+              }`}
+            >
+              {data.scopeLabel}
+            </span>
+          ) : null}
+        </div>
+        {data.showOrder && data.order ? (
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+              selected
+                ? "border-slate-600 bg-slate-800 text-slate-200"
+                : "border-slate-200 bg-white text-slate-500"
+            }`}
+          >
+            {data.order}
+          </span>
+        ) : null}
+      </div>
+      <p
+        className={`text-[11px] ${
+          selected ? "text-slate-300" : "text-slate-500"
+        }`}
+      >
+        {data.conceptKey}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
+        {data.flags.conditional ? (
+          <span
+            className={`rounded-full px-2 py-0.5 font-semibold ${
+              selected
+                ? "bg-sky-500/30 text-sky-100"
+                : "bg-sky-100 text-sky-700"
+            }`}
+          >
+            voorwaardelijk
+          </span>
+        ) : null}
+        {data.flags.duplicate ? (
+          <span
+            className={`rounded-full px-2 py-0.5 font-semibold ${
+              selected
+                ? "bg-rose-500/30 text-rose-100"
+                : "bg-rose-100 text-rose-700"
+            }`}
+          >
+            dup
+          </span>
+        ) : null}
+        {data.flags.missingOutputs ? (
+          <span
+            className={`rounded-full px-2 py-0.5 font-semibold ${
+              selected
+                ? "bg-amber-500/30 text-amber-100"
+                : "bg-amber-100 text-amber-700"
+            }`}
+          >
+            geen outputs
+          </span>
+        ) : null}
+        {data.flags.orphan ? (
+          <span
+            className={`rounded-full px-2 py-0.5 font-semibold ${
+              selected
+                ? "bg-slate-500/30 text-slate-100"
+                : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            los
+          </span>
+        ) : null}
+      </div>
+      <Handle type="source" position={Position.Bottom} style={handleStyle} />
     </div>
-    <Handle
-      type="source"
-      position={Position.Bottom}
-      style={handleStyle}
-    />
-  </div>
-);
+  );
+};
 
 const slugify = (value: string) =>
   value
@@ -236,6 +263,216 @@ const questionHasOutputs = (question: Question) => {
   );
 };
 
+type FlowWithLabel = {
+  flow: Flow;
+  label: string;
+};
+
+type ActiveFlow = {
+  id: string;
+  name: string;
+  scope: FlowScope;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  excludedQuestionIds?: string[];
+};
+
+type ResolvedFlows = {
+  nodes: Flow["nodes"];
+  edges: Flow["edges"];
+  nodeInfoById: Map<
+    string,
+    {
+      questionId: string;
+      flowId: string;
+      label: string;
+      level: FlowScope["level"];
+    }
+  >;
+  edgeInfoById: Map<
+    string,
+    {
+      flowId: string;
+      label: string;
+      level: FlowScope["level"];
+    }
+  >;
+  decisionByQuestionId: Map<
+    string,
+    {
+      nodeId?: string;
+      flowId: string;
+      label: string;
+      level: FlowScope["level"];
+      isExcluded: boolean;
+    }
+  >;
+};
+
+const resolveMergedFlows = (
+  merged: FlowWithLabel[],
+  preferredFlowId?: string | null
+): ResolvedFlows => {
+  const resolveNodeId = (flowId: string, nodeId: string) =>
+    preferredFlowId && flowId === preferredFlowId
+      ? nodeId
+      : `${flowId}::${nodeId}`;
+  const nodeInfoById = new Map<
+    string,
+    {
+      questionId: string;
+      flowId: string;
+      label: string;
+      level: FlowScope["level"];
+    }
+  >();
+  const flowNodeInfoByFlowId = new Map<
+    string,
+    Map<string, { questionId: string; resolvedId: string }>
+  >();
+  const flowQuestionIdsByFlowId = new Map<string, Set<string>>();
+  merged.forEach(({ flow, label }) => {
+    const questionIds = new Set<string>();
+    const flowNodeInfo = new Map<
+      string,
+      { questionId: string; resolvedId: string }
+    >();
+    flow.nodes.forEach((node) => {
+      const resolvedId = resolveNodeId(flow.id, node.id);
+      nodeInfoById.set(resolvedId, {
+        questionId: node.questionId,
+        flowId: flow.id,
+        label,
+        level: flow.scope.level,
+      });
+      flowNodeInfo.set(node.id, {
+        questionId: node.questionId,
+        resolvedId,
+      });
+      questionIds.add(node.questionId);
+    });
+    flowNodeInfoByFlowId.set(flow.id, flowNodeInfo);
+    flowQuestionIdsByFlowId.set(flow.id, questionIds);
+  });
+
+  const decisionByQuestionId = new Map<
+    string,
+    {
+      nodeId?: string;
+      flowId: string;
+      label: string;
+      level: FlowScope["level"];
+      isExcluded: boolean;
+    }
+  >();
+  [...merged].reverse().forEach(({ flow, label }) => {
+    const flowQuestionIds = flowQuestionIdsByFlowId.get(flow.id) ?? new Set();
+    const flowNodeInfo = flowNodeInfoByFlowId.get(flow.id) ?? new Map();
+    flow.nodes.forEach((node) => {
+      const info = flowNodeInfo.get(node.id);
+      if (!info) {
+        return;
+      }
+      if (!decisionByQuestionId.has(node.questionId)) {
+        decisionByQuestionId.set(node.questionId, {
+          nodeId: info.resolvedId,
+          flowId: flow.id,
+          label,
+          level: flow.scope.level,
+          isExcluded: false,
+        });
+      }
+    });
+    (flow.excludedQuestionIds ?? []).forEach((questionId) => {
+      if (flowQuestionIds.has(questionId)) {
+        return;
+      }
+      if (!decisionByQuestionId.has(questionId)) {
+        decisionByQuestionId.set(questionId, {
+          flowId: flow.id,
+          label,
+          level: flow.scope.level,
+          isExcluded: true,
+        });
+      }
+    });
+  });
+
+  const winningNodeIdByQuestionId = new Map<string, string>();
+  decisionByQuestionId.forEach((decision, questionId) => {
+    if (!decision.isExcluded && decision.nodeId) {
+      winningNodeIdByQuestionId.set(questionId, decision.nodeId);
+    }
+  });
+
+  const nodes: Flow["nodes"] = [];
+  merged.forEach(({ flow }) => {
+    const flowNodeInfo = flowNodeInfoByFlowId.get(flow.id) ?? new Map();
+    flow.nodes.forEach((node) => {
+      const decision = decisionByQuestionId.get(node.questionId);
+      const info = flowNodeInfo.get(node.id);
+      if (
+        !decision ||
+        !info ||
+        decision.isExcluded ||
+        decision.nodeId !== info.resolvedId
+      ) {
+        return;
+      }
+      nodes.push({ ...node, id: info.resolvedId });
+    });
+  });
+
+  const edgeKeys = new Set<string>();
+  const edges: Flow["edges"] = [];
+  const edgeInfoById = new Map<
+    string,
+    {
+      flowId: string;
+      label: string;
+      level: FlowScope["level"];
+    }
+  >();
+  const resolveEdgeId = (flowId: string, edgeId: string) =>
+    preferredFlowId && flowId === preferredFlowId
+      ? edgeId
+      : `${flowId}::${edgeId}`;
+  merged.forEach(({ flow, label }) => {
+    const flowNodeInfo = flowNodeInfoByFlowId.get(flow.id) ?? new Map();
+    flow.edges.forEach((edge) => {
+      const fromQuestionId = flowNodeInfo.get(edge.from)?.questionId;
+      const toQuestionId = flowNodeInfo.get(edge.to)?.questionId;
+      if (!fromQuestionId || !toQuestionId) {
+        return;
+      }
+      const fromNodeId = winningNodeIdByQuestionId.get(fromQuestionId);
+      const toNodeId = winningNodeIdByQuestionId.get(toQuestionId);
+      if (!fromNodeId || !toNodeId) {
+        return;
+      }
+      const key = `${fromNodeId}:${toNodeId}:${edge.when?.expression ?? ""}`;
+      if (edgeKeys.has(key)) {
+        return;
+      }
+      edgeKeys.add(key);
+      const edgeId = resolveEdgeId(flow.id, edge.id);
+      edges.push({
+        ...edge,
+        id: edgeId,
+        from: fromNodeId,
+        to: toNodeId,
+      });
+      edgeInfoById.set(edgeId, {
+        flowId: flow.id,
+        label,
+        level: flow.scope.level,
+      });
+    });
+  });
+
+  return { nodes, edges, nodeInfoById, edgeInfoById, decisionByQuestionId };
+};
+
 type ConfirmState = PopupState & {
   confirmLabel: string;
   onConfirm: () => void;
@@ -270,6 +507,7 @@ export default function QuestionMapVisualPage() {
   const [nodes, setNodes] = useState<Node<QuestionNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const flowInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const fullscreenContainerRef = useRef<HTMLDivElement | null>(null);
   const pendingFitRef = useRef(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [isFlowReady, setIsFlowReady] = useState(false);
@@ -295,8 +533,12 @@ export default function QuestionMapVisualPage() {
   const [showHelp, setShowHelp] = useState(true);
   const [showPreview, setShowPreview] = useState(true);
   const [showNodeOrder, setShowNodeOrder] = useState(true);
+  const [showEdgeLabels, setShowEdgeLabels] = useState(false);
+  const [showCombinedFlow, setShowCombinedFlow] = useState(true);
+  const [showGlobalGhosts, setShowGlobalGhosts] = useState(true);
   const [showConditions, setShowConditions] = useState(false);
   const [isCanvasExpanded, setIsCanvasExpanded] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [showLibraryOverlay, setShowLibraryOverlay] = useState(false);
   const [edgeDraft, setEdgeDraft] = useState({
     from: "",
@@ -329,7 +571,10 @@ export default function QuestionMapVisualPage() {
       return;
     }
     const stored = window.localStorage.getItem(CANVAS_SIZE_STORAGE_KEY);
-    if (stored === "expanded") {
+    if (stored === "expanded" && typeof document !== "undefined") {
+      if (!document.fullscreenElement) {
+        return;
+      }
       setIsCanvasExpanded(true);
     }
   }, []);
@@ -349,6 +594,26 @@ export default function QuestionMapVisualPage() {
       setShowLibraryOverlay(false);
     }
   }, [isCanvasExpanded]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    const handleFullscreenChange = () => {
+      const active = Boolean(document.fullscreenElement);
+      setIsFullscreen(active);
+      setIsCanvasExpanded(active);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () =>
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    if (!isFullscreen && isCanvasExpanded) {
+      setIsCanvasExpanded(false);
+    }
+  }, [isCanvasExpanded, isFullscreen]);
 
   useEffect(() => {
     const loadedConfig = loadWizardConfig();
@@ -571,17 +836,11 @@ export default function QuestionMapVisualPage() {
   ]);
 
   const activeSlot = scopeSlots[activeScopeIndex] ?? scopeSlots[0] ?? null;
+  const activeScopeLevel = activeSlot?.scope.level;
   const activeFlow = activeSlot
-    ? findBestMatchingFlow(library.flows, activeSlot.scope)
+    ? (findBestMatchingFlow(library.flows, activeSlot.scope) as ActiveFlow | null)
     : null;
-  const conditionalNodeIds = useMemo(() => {
-    const set = new Set<string>();
-    if (!activeFlow) {
-      return set;
-    }
-    activeFlow.edges.forEach((edge) => set.add(edge.to));
-    return set;
-  }, [activeFlow]);
+  const activeFlowId = activeFlow?.id ?? null;
   const { previewMergedFlows, previewMissingFlowLabels } = useMemo(() => {
     const byLevel = new Map<FlowScope["level"], { flow: Flow; label: string }>();
     scopeSlots.forEach((slot) => {
@@ -591,13 +850,7 @@ export default function QuestionMapVisualPage() {
       }
     });
 
-    const orderedLevels: FlowScope["level"][] = [
-      "global",
-      "category",
-      "context",
-      "installation",
-    ];
-    const merged = orderedLevels
+    const merged = FLOW_LEVELS
       .map((level) => byLevel.get(level))
       .filter((item): item is { flow: Flow; label: string } => Boolean(item));
     const missing = scopeSlots
@@ -606,40 +859,44 @@ export default function QuestionMapVisualPage() {
 
     return { previewMergedFlows: merged, previewMissingFlowLabels: missing };
   }, [library.flows, scopeSlots]);
-  const previewCombinedFlow = useMemo(() => {
-    const nodes: Flow["nodes"] = [];
-    const edges: Flow["edges"] = [];
-    const seenQuestionIds = new Set<string>();
-
-    previewMergedFlows.forEach(({ flow }) => {
-      flow.nodes.forEach((node) => {
-        if (seenQuestionIds.has(node.questionId)) {
-          return;
-        }
-        seenQuestionIds.add(node.questionId);
-        nodes.push(node);
-      });
-      edges.push(...flow.edges);
+  const canvasMergedFlows = useMemo(() => {
+    const byLevel = new Map<FlowScope["level"], { flow: Flow; label: string }>();
+    scopeSlots.forEach((slot) => {
+      const flow = findBestMatchingFlow(library.flows, slot.scope);
+      if (flow) {
+        byLevel.set(slot.scope.level, { flow, label: slot.label });
+      }
     });
 
-    const nodeIds = new Set(nodes.map((node) => node.id));
-    const filteredEdges = edges.filter(
-      (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)
-    );
-
-    return { nodes, edges: filteredEdges };
-  }, [previewMergedFlows]);
+    const activeIndex =
+      activeScopeLevel != null
+        ? FLOW_LEVELS.indexOf(activeScopeLevel)
+      : FLOW_LEVELS.length - 1;
+    const maxIndex = activeIndex === -1 ? FLOW_LEVELS.length - 1 : activeIndex;
+    const merged = FLOW_LEVELS.slice(0, maxIndex + 1)
+      .map((level) => byLevel.get(level))
+      .filter((item): item is { flow: Flow; label: string } => Boolean(item));
+    return merged;
+  }, [activeScopeLevel, library.flows, scopeSlots]);
+  const previewResolved = useMemo(
+    () => resolveMergedFlows(previewMergedFlows, activeFlowId),
+    [activeFlowId, previewMergedFlows]
+  );
+  const canvasResolved = useMemo(
+    () => resolveMergedFlows(canvasMergedFlows, activeFlowId),
+    [activeFlowId, canvasMergedFlows]
+  );
   const previewIncomingEdges = useMemo(() => {
     const map = new Map<string, Flow["edges"]>();
-    previewCombinedFlow.edges.forEach((edge) => {
+    previewResolved.edges.forEach((edge) => {
       const list = map.get(edge.to) ?? [];
       list.push(edge);
       map.set(edge.to, list);
     });
     return map;
-  }, [previewCombinedFlow.edges]);
+  }, [previewResolved.edges]);
   const previewQuestions = useMemo(() => {
-    return previewCombinedFlow.nodes.map((node, index) => {
+    return previewResolved.nodes.map((node, index) => {
       const question = questionMap.get(node.questionId) ?? null;
       const edges = previewIncomingEdges.get(node.id) ?? [];
       const conditions = edges
@@ -653,82 +910,462 @@ export default function QuestionMapVisualPage() {
         conditions,
       };
     });
-  }, [previewCombinedFlow.nodes, previewIncomingEdges, questionMap]);
+  }, [previewIncomingEdges, previewResolved.nodes, questionMap]);
   const previewFlowSummary = useMemo(
     () => previewMergedFlows.map((item) => item.label).join(" + "),
     [previewMergedFlows]
+  );
+  const hasCanvasGlobalFlow = useMemo(
+    () => canvasMergedFlows.some((item) => item.flow.scope.level === "global"),
+    [canvasMergedFlows]
   );
   const previewStats = useMemo(() => {
     const conditional = previewQuestions.filter((item) => item.isConditional)
       .length;
     return { total: previewQuestions.length, conditional };
   }, [previewQuestions]);
+  const questionResolutionById = previewResolved.decisionByQuestionId;
+  const canvasResolutionById = canvasResolved.decisionByQuestionId;
+  const ghostNodeEntries = useMemo(() => {
+    if (!showCombinedFlow || !showGlobalGhosts) {
+      return [];
+    }
+    const entries: {
+      node: FlowNode;
+      questionId: string;
+      flowLabel: string;
+      flowLevel: FlowScope["level"];
+      winnerNodeId: string;
+    }[] = [];
+    canvasMergedFlows.forEach(({ flow, label }) => {
+      if (flow.scope.level !== "global") {
+        return;
+      }
+      flow.nodes.forEach((node) => {
+        const decision = canvasResolutionById.get(node.questionId);
+        if (
+          !decision ||
+          decision.flowId === flow.id ||
+          decision.isExcluded ||
+          !decision.nodeId
+        ) {
+          return;
+        }
+        entries.push({
+          node,
+          questionId: node.questionId,
+          flowLabel: label,
+          flowLevel: flow.scope.level,
+          winnerNodeId: decision.nodeId,
+        });
+      });
+    });
+    return entries;
+  }, [canvasMergedFlows, canvasResolutionById, showCombinedFlow, showGlobalGhosts]);
+  const previewPanel = (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+      <div className="space-y-3 text-xs text-slate-600">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+            Preview stap 3
+          </p>
+          <span className="text-[11px] text-slate-400">
+            {previewFlowSummary || "geen flow"}
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          Zo ziet de vragenlijst eruit voor deze selectie. Relaties kunnen vragen
+          verbergen.
+        </p>
+        <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
+            {previewStats.total} vragen
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
+            {previewStats.conditional} voorwaardelijk
+          </span>
+        </div>
+        {previewMissingFlowLabels.length > 0 ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+            Geen flow voor: {previewMissingFlowLabels.join(", ")}.
+          </div>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowNodeOrder((prev) => !prev)}
+            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            {showNodeOrder ? "Nummers verbergen" : "Nummers tonen"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowConditions((prev) => !prev)}
+            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            {showConditions ? "Voorwaarden verbergen" : "Voorwaarden tonen"}
+          </button>
+        </div>
+        <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
+          {previewQuestions.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+              Nog geen vragen gevonden voor deze selectie.
+            </div>
+          ) : (
+            previewQuestions.map((item) => {
+              const kindLabel = item.question
+                ? questionKindLabels[item.question.kind]
+                : "Onbekend";
+              return (
+                <div
+                  key={item.nodeId}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2">
+                      {showNodeOrder ? (
+                        <span className="mt-0.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                          {item.order}
+                        </span>
+                      ) : null}
+                      <div>
+                        <p className="text-[12px] font-semibold text-slate-700">
+                          {item.question?.prompt ?? item.nodeId}
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          {item.question?.conceptKey ?? item.nodeId}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                        {kindLabel}
+                      </span>
+                      {item.isConditional ? (
+                        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                          voorwaardelijk
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  {showConditions && item.isConditional ? (
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Voorwaarde:{" "}
+                      {item.conditions.length > 0
+                        ? item.conditions.join(" | ")
+                        : "geen specifieke regel"}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const canvasDefinition = useMemo(() => {
+    const nodeEntries: {
+      node: Flow["nodes"][number];
+      questionId: string;
+      flowId: string;
+      flowLabel: string;
+      flowLevel: FlowScope["level"];
+      isLocked: boolean;
+    }[] = [];
+    const edgeEntries: {
+      edge: Flow["edges"][number];
+      isLocked: boolean;
+    }[] = [];
+    const nodeMetaById = new Map<
+      string,
+      {
+        questionId: string;
+        flowId: string;
+        flowLabel: string;
+        flowLevel: FlowScope["level"];
+        isLocked: boolean;
+      }
+    >();
+    const edgeMetaById = new Map<
+      string,
+      {
+        flowId: string;
+        flowLabel: string;
+        flowLevel: FlowScope["level"];
+        isLocked: boolean;
+      }
+    >();
+
+    if (!showCombinedFlow) {
+      if (!activeFlow) {
+        return { nodeEntries, edgeEntries, nodeMetaById, edgeMetaById };
+      }
+      const flowLabel = activeSlot?.label ?? activeFlow.name;
+      activeFlow.nodes.forEach((node) => {
+        const entry = {
+          node,
+          questionId: node.questionId,
+          flowId: activeFlow.id,
+          flowLabel,
+          flowLevel: activeFlow.scope.level,
+          isLocked: false,
+        };
+        nodeEntries.push(entry);
+        nodeMetaById.set(node.id, {
+          questionId: node.questionId,
+          flowId: activeFlow.id,
+          flowLabel,
+          flowLevel: activeFlow.scope.level,
+          isLocked: false,
+        });
+      });
+      activeFlow.edges.forEach((edge) => {
+        edgeEntries.push({ edge, isLocked: false });
+        edgeMetaById.set(edge.id, {
+          flowId: activeFlow.id,
+          flowLabel,
+          flowLevel: activeFlow.scope.level,
+          isLocked: false,
+        });
+      });
+      return { nodeEntries, edgeEntries, nodeMetaById, edgeMetaById };
+    }
+
+    canvasResolved.nodes.forEach((node) => {
+      const info = canvasResolved.nodeInfoById.get(node.id);
+      if (!info) {
+        return;
+      }
+      const isLocked = info.flowId !== activeFlow?.id;
+      nodeEntries.push({
+        node,
+        questionId: info.questionId,
+        flowId: info.flowId,
+        flowLabel: info.label,
+        flowLevel: info.level,
+        isLocked,
+      });
+      nodeMetaById.set(node.id, {
+        questionId: info.questionId,
+        flowId: info.flowId,
+        flowLabel: info.label,
+        flowLevel: info.level,
+        isLocked,
+      });
+    });
+    canvasResolved.edges.forEach((edge) => {
+      const info = canvasResolved.edgeInfoById.get(edge.id);
+      if (!info) {
+        return;
+      }
+      const isLocked = info.flowId !== activeFlow?.id;
+      edgeEntries.push({ edge, isLocked });
+      edgeMetaById.set(edge.id, {
+        flowId: info.flowId,
+        flowLabel: info.label,
+        flowLevel: info.level,
+        isLocked,
+      });
+    });
+    return { nodeEntries, edgeEntries, nodeMetaById, edgeMetaById };
+  }, [activeFlow, activeSlot?.label, canvasResolved, showCombinedFlow]);
+
+  const conditionalNodeIds = useMemo(() => {
+    const set = new Set<string>();
+    canvasDefinition.edgeEntries.forEach((entry) => set.add(entry.edge.to));
+    return set;
+  }, [canvasDefinition.edgeEntries]);
+
+  const activeNodeIds = useMemo(
+    () => new Set(activeFlow?.nodes.map((node) => node.id) ?? []),
+    [activeFlow?.nodes]
+  );
+
+  const canvasNodeLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    canvasDefinition.nodeEntries.forEach((entry) => {
+      map.set(
+        entry.node.id,
+        questionMap.get(entry.questionId)?.prompt ?? entry.questionId
+      );
+    });
+    return map;
+  }, [canvasDefinition.nodeEntries, questionMap]);
 
   useEffect(() => {
-    if (!activeFlow) {
+    if (!showCombinedFlow && !activeFlow?.id) {
       pendingFitRef.current = false;
       return;
     }
     pendingFitRef.current = true;
-  }, [activeFlow?.id]);
+  }, [activeFlow?.id, showCombinedFlow]);
 
   useEffect(() => {
     setSelectedQuestionId(null);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setEdgeDraft({ from: "", to: "", expression: "" });
-  }, [activeFlow?.id]);
+  }, [activeFlow?.id, showCombinedFlow]);
 
   useEffect(() => {
-    if (!activeFlow) {
+    if (canvasDefinition.nodeEntries.length === 0) {
       setNodes([]);
       setEdges([]);
       return;
     }
 
-    const nextNodes = activeFlow.nodes.map((node, index) => {
-      const question = questionMap.get(node.questionId);
+    const nextNodes = canvasDefinition.nodeEntries.map((entry, index) => {
+      const question = questionMap.get(entry.questionId);
+      const isLocked = entry.isLocked;
       return {
-        id: node.id,
-        position: node.position ?? buildDefaultPosition(index),
+        id: entry.node.id,
+        position: entry.node.position ?? buildDefaultPosition(index),
         type: "questionNode",
         data: {
-          label: question?.prompt ?? node.questionId,
-          conceptKey: question?.conceptKey ?? node.questionId,
+          label: question?.prompt ?? entry.questionId,
+          conceptKey: question?.conceptKey ?? entry.questionId,
+          questionId: entry.questionId,
+          scopeLabel: isLocked ? entry.flowLabel : undefined,
           order: index + 1,
           showOrder: showNodeOrder,
+          isLocked,
           flags: {
-            conditional: conditionalNodeIds.has(node.id),
-            duplicate: duplicatePromptIds.has(node.questionId),
-            missingOutputs: missingOutputIds.has(node.questionId),
-            orphan: orphanQuestionIds.has(node.questionId),
+            conditional: conditionalNodeIds.has(entry.node.id),
+            duplicate: duplicatePromptIds.has(entry.questionId),
+            missingOutputs: missingOutputIds.has(entry.questionId),
+            orphan: orphanQuestionIds.has(entry.questionId),
           },
         },
+        draggable: !isLocked,
+        selectable: true,
+        connectable: !isLocked,
+        deletable: !isLocked,
       } satisfies Node<QuestionNodeData>;
     });
 
-    const nextEdges = activeFlow.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.from,
-      target: edge.to,
-      type: "smoothstep",
-      label: edge.when?.expression ?? "",
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#0f172a" },
-      style: { stroke: "#0f172a", strokeWidth: 1.5 },
-      labelStyle: { fill: "#475569", fontSize: 10, fontWeight: 600 },
-      labelBgStyle: { fill: "#f8fafc", stroke: "#e2e8f0" },
-      labelBgPadding: [6, 4],
-    }));
+    const nodePositions = new Map(
+      nextNodes.map((node) => [node.id, node.position])
+    );
+    const nodeOrder = new Map<string, number>();
+    canvasDefinition.nodeEntries.forEach((entry, index) => {
+      nodeOrder.set(entry.node.id, index);
+    });
+    const edgeOffsets = new Map<string, number>();
+    const edgesBySource = new Map<string, { id: string; to: string }[]>();
+    canvasDefinition.edgeEntries.forEach((entry) => {
+      if (!entry.edge.when?.expression) {
+        return;
+      }
+      const list = edgesBySource.get(entry.edge.from) ?? [];
+      list.push({ id: entry.edge.id, to: entry.edge.to });
+      edgesBySource.set(entry.edge.from, list);
+    });
+    edgesBySource.forEach((edges) => {
+      if (edges.length < 2) {
+        return;
+      }
+      edges.sort((a, b) => {
+        const order =
+          (nodeOrder.get(a.to) ?? 0) - (nodeOrder.get(b.to) ?? 0);
+        if (order !== 0) {
+          return order;
+        }
+        return a.id.localeCompare(b.id);
+      });
+      edges.forEach((edge, index) => {
+        const offset = index * 16;
+        if (offset !== 0) {
+          edgeOffsets.set(edge.id, offset);
+        }
+      });
+    });
+    const ghostOffsets = new Map<string, number>();
+    const ghostNodes = ghostNodeEntries.map((entry, index) => {
+      const basePosition =
+        nodePositions.get(entry.winnerNodeId) ??
+        entry.node.position ??
+        buildDefaultPosition(index);
+      const offsetIndex = ghostOffsets.get(entry.winnerNodeId) ?? 0;
+      ghostOffsets.set(entry.winnerNodeId, offsetIndex + 1);
+      const question = questionMap.get(entry.questionId);
+      const ghostId = `ghost::${entry.node.id}`;
+      return {
+        id: ghostId,
+        position: {
+          x: basePosition.x - 200,
+          y: basePosition.y + offsetIndex * 40,
+        },
+        type: "questionNode",
+        data: {
+          label: question?.prompt ?? entry.questionId,
+          conceptKey: question?.conceptKey ?? entry.questionId,
+          questionId: entry.questionId,
+          scopeLabel: entry.flowLabel,
+          showOrder: false,
+          isLocked: true,
+          isGhost: true,
+          flags: {
+            conditional: false,
+            duplicate: duplicatePromptIds.has(entry.questionId),
+            missingOutputs: missingOutputIds.has(entry.questionId),
+            orphan: orphanQuestionIds.has(entry.questionId),
+          },
+        },
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        deletable: false,
+      } satisfies Node<QuestionNodeData>;
+    });
 
-    setNodes(nextNodes);
+    const nextEdges = canvasDefinition.edgeEntries.map((entry) => {
+      const strokeColor = entry.isLocked ? "#cbd5e1" : "#0f172a";
+      const labelColor = entry.isLocked ? "#94a3b8" : "#475569";
+      const expression = entry.edge.when?.expression;
+      const showLabel =
+        Boolean(expression) &&
+        (showEdgeLabels || entry.edge.id === selectedEdgeId);
+      const pathOffset = edgeOffsets.get(entry.edge.id);
+      return {
+        id: entry.edge.id,
+        source: entry.edge.from,
+        target: entry.edge.to,
+        type: "smoothstep",
+        label: showLabel ? expression : undefined,
+        markerEnd: { type: MarkerType.ArrowClosed, color: strokeColor },
+        pathOptions:
+          pathOffset != null ? { offset: pathOffset } : undefined,
+        style: {
+          stroke: strokeColor,
+          strokeWidth: entry.isLocked ? 1 : 1.5,
+          strokeDasharray: entry.isLocked ? "4 4" : undefined,
+        },
+        labelStyle: showLabel
+          ? { fill: labelColor, fontSize: 10, fontWeight: 600 }
+          : undefined,
+        labelBgStyle: showLabel
+          ? { fill: "#f8fafc", stroke: "#e2e8f0" }
+          : undefined,
+        labelBgPadding: showLabel ? ([6, 4] as [number, number]) : undefined,
+        selectable: !entry.isLocked,
+        deletable: !entry.isLocked,
+      };
+    });
+
+    setNodes([...ghostNodes, ...nextNodes]);
     setEdges(nextEdges);
   }, [
-    activeFlow,
+    canvasDefinition,
     conditionalNodeIds,
     duplicatePromptIds,
+    ghostNodeEntries,
     missingOutputIds,
     orphanQuestionIds,
     questionMap,
+    selectedEdgeId,
+    showEdgeLabels,
     showNodeOrder,
   ]);
 
@@ -774,11 +1411,18 @@ export default function QuestionMapVisualPage() {
     () => new Set(activeFlow?.nodes.map((node) => node.questionId) ?? []),
     [activeFlow?.nodes]
   );
+  const excludedQuestionIds = useMemo(
+    () => new Set(activeFlow?.excludedQuestionIds ?? []),
+    [activeFlow?.excludedQuestionIds]
+  );
+  const canToggleExclusions =
+    Boolean(activeSlot) && activeSlot.scope.level !== "global";
   const flowNodeCount = activeFlow?.nodes.length ?? 0;
   const flowEdgeCount = activeFlow?.edges.length ?? 0;
   const hasActiveFlow = Boolean(activeFlow);
   const hasFlowNodes = flowNodeCount > 0;
   const hasFlowEdges = flowEdgeCount > 0;
+  const hasCanvasNodes = canvasDefinition.nodeEntries.length > 0;
   const firstQuestionId = library.questions[0]?.id ?? "";
   const nodeLabelMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -800,9 +1444,22 @@ export default function QuestionMapVisualPage() {
   const selectedEdge = activeFlow?.edges.find(
     (edge) => edge.id === selectedEdgeId
   );
+  const selectedNodeMeta = selectedNodeId
+    ? canvasDefinition.nodeMetaById.get(selectedNodeId) ?? null
+    : null;
+  const selectedNodeIsLocked = Boolean(selectedNodeMeta?.isLocked);
+  const selectedQuestionResolution = selectedQuestion
+    ? questionResolutionById.get(selectedQuestion.id) ?? null
+    : null;
+  const selectedQuestionIsLocked =
+    selectedQuestionResolution !== null &&
+    selectedQuestionResolution.flowId !== activeFlow?.id &&
+    !selectedQuestionResolution.isExcluded;
+  const canDeleteSelection =
+    Boolean(selectedEdgeId) || (Boolean(selectedNodeId) && !selectedNodeIsLocked);
 
   useEffect(() => {
-    if (!selectedNodeId) {
+    if (!selectedNodeId || selectedNodeIsLocked) {
       return;
     }
     setEdgeDraft((prev) => {
@@ -814,7 +1471,7 @@ export default function QuestionMapVisualPage() {
       }
       return prev;
     });
-  }, [selectedNodeId]);
+  }, [selectedNodeId, selectedNodeIsLocked]);
 
   const createQuestion = () => {
     const existingIds = library.questions.map((question) => question.id);
@@ -1000,6 +1657,7 @@ export default function QuestionMapVisualPage() {
       scope: scopeItem,
       nodes: [],
       edges: [],
+      excludedQuestionIds: [],
     };
     setLibrary((prev) => ({
       ...prev,
@@ -1034,6 +1692,7 @@ export default function QuestionMapVisualPage() {
           },
         ],
         edges: [],
+        excludedQuestionIds: [],
       };
       return {
         ...prev,
@@ -1057,21 +1716,26 @@ export default function QuestionMapVisualPage() {
           flow.nodes.map((node) => node.id)
         );
         const nextPosition = buildDefaultPosition(flow.nodes.length);
+        const nextExcludedQuestionIds = (flow.excludedQuestionIds ?? []).filter(
+          (excludedId) => excludedId !== questionId
+        );
         return {
           ...flow,
           nodes: [
             ...flow.nodes,
             { id: nextNodeId, questionId, position: nextPosition },
           ],
+          excludedQuestionIds: nextExcludedQuestionIds,
         };
       }),
     }));
   };
 
-  const removeNodeFromFlow = (flowId: string, nodeId: string) => {
-    setLibrary((prev) => ({
-      ...prev,
-      flows: prev.flows.map((flow) => {
+  const removeNodeFromFlow = useCallback(
+    (flowId: string, nodeId: string) => {
+      setLibrary((prev) => ({
+        ...prev,
+        flows: prev.flows.map((flow) => {
         if (flow.id !== flowId) {
           return flow;
         }
@@ -1089,6 +1753,69 @@ export default function QuestionMapVisualPage() {
     if (selectedNodeId === nodeId) {
       setSelectedNodeId(null);
     }
+  }, [selectedNodeId]);
+
+  const toggleExclusionForActiveScope = (questionId: string) => {
+    if (!activeSlot || activeSlot.scope.level === "global") {
+      return;
+    }
+    if (!activeFlow) {
+      setLibrary((prev) => {
+        const existingIds = prev.flows.map((flow) => flow.id);
+        const base = slugify(
+          `flow-${activeSlot.scope.level}-${activeSlot.label}`
+        );
+        const nextFlowId = uniqueId(base, existingIds);
+        const nextFlow: Flow = {
+          id: nextFlowId,
+          name: activeSlot.label,
+          scope: activeSlot.scope,
+          nodes: [],
+          edges: [],
+          excludedQuestionIds: [questionId],
+        };
+        return {
+          ...prev,
+          flows: [...prev.flows, nextFlow],
+        };
+      });
+      return;
+    }
+    setLibrary((prev) => ({
+      ...prev,
+      flows: prev.flows.map((flow) => {
+        if (flow.id !== activeFlow.id) {
+          return flow;
+        }
+        const nextExcluded = new Set(flow.excludedQuestionIds ?? []);
+        const wasExcluded = nextExcluded.has(questionId);
+        if (wasExcluded) {
+          nextExcluded.delete(questionId);
+        } else {
+          nextExcluded.add(questionId);
+        }
+        let nodes = flow.nodes;
+        let edges = flow.edges;
+        if (!wasExcluded) {
+          const remainingNodes = flow.nodes.filter(
+            (node) => node.questionId !== questionId
+          );
+          if (remainingNodes.length !== flow.nodes.length) {
+            const nodeIds = new Set(remainingNodes.map((node) => node.id));
+            nodes = remainingNodes;
+            edges = flow.edges.filter(
+              (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)
+            );
+          }
+        }
+        return {
+          ...flow,
+          nodes,
+          edges,
+          excludedQuestionIds: Array.from(nextExcluded),
+        };
+      }),
+    }));
   };
 
   const addEdgeToFlow = (flowId: string, nextEdge: FlowEdge) => {
@@ -1122,7 +1849,7 @@ export default function QuestionMapVisualPage() {
     }));
   };
 
-  const removeEdge = (flowId: string, edgeId: string) => {
+  const removeEdge = useCallback((flowId: string, edgeId: string) => {
     setLibrary((prev) => ({
       ...prev,
       flows: prev.flows.map((flow) =>
@@ -1134,7 +1861,7 @@ export default function QuestionMapVisualPage() {
     if (selectedEdgeId === edgeId) {
       setSelectedEdgeId(null);
     }
-  };
+  }, [selectedEdgeId]);
 
   const handleSave = () => {
     setIsSaving(true);
@@ -1520,10 +2247,14 @@ export default function QuestionMapVisualPage() {
   );
 
   const handleConnect = useCallback((connection: Connection) => {
-    if (!activeFlow || !connection.source || !connection.target) {
+    if (!activeFlow || connection.source == null || connection.target == null) {
       return;
     }
-    if (connection.source === connection.target) {
+    const { source, target } = connection;
+    if (source === target) {
+      return;
+    }
+    if (!activeNodeIds.has(source) || !activeNodeIds.has(target)) {
       return;
     }
     const nextEdgeId = uniqueId(
@@ -1532,16 +2263,16 @@ export default function QuestionMapVisualPage() {
     );
     const nextEdge: FlowEdge = {
       id: nextEdgeId,
-      from: connection.source,
-      to: connection.target,
+      from: source,
+      to: target,
     };
     addEdgeToFlow(activeFlow.id, nextEdge);
     setEdges((current) =>
       addEdge(
         {
           id: nextEdgeId,
-          source: connection.source,
-          target: connection.target,
+          source,
+          target,
           type: "smoothstep",
           markerEnd: { type: MarkerType.ArrowClosed, color: "#0f172a" },
           style: { stroke: "#0f172a", strokeWidth: 1.5 },
@@ -1552,10 +2283,13 @@ export default function QuestionMapVisualPage() {
     setSelectedEdgeId(nextEdgeId);
     setSelectedNodeId(null);
     setSelectedQuestionId(null);
-  }, [activeFlow]);
+  }, [activeFlow, activeNodeIds]);
 
   const handleNodeDragStop = useCallback((_event: unknown, node: Node) => {
     if (!activeFlow || !node?.id) {
+      return;
+    }
+    if (!activeNodeIds.has(node.id)) {
       return;
     }
     setLibrary((prev) => ({
@@ -1573,7 +2307,7 @@ export default function QuestionMapVisualPage() {
           : flow
       ),
     }));
-  }, [activeFlow]);
+  }, [activeFlow, activeNodeIds]);
 
   const handleFlowInit = useCallback((instance: ReactFlowInstance) => {
     if (flowInstanceRef.current) {
@@ -1592,6 +2326,234 @@ export default function QuestionMapVisualPage() {
       instance.fitView({ padding: 0.2, duration: 200 });
     });
   }, []);
+
+  const handleAutoLayout = useCallback(() => {
+    const layoutEntries = showCombinedFlow
+      ? canvasDefinition.nodeEntries.map((entry, index) => ({
+          id: entry.node.id,
+          flowId: entry.flowId,
+          order: index,
+        }))
+      : activeFlow
+      ? activeFlow.nodes.map((node, index) => ({
+          id: node.id,
+          flowId: activeFlow.id,
+          order: index,
+        }))
+      : [];
+
+    if (layoutEntries.length === 0) {
+      return;
+    }
+
+    const layoutEdges = showCombinedFlow
+      ? canvasDefinition.edgeEntries.map((entry) => entry.edge)
+      : activeFlow?.edges ?? [];
+
+    const nodeOrder = new Map<string, number>();
+    layoutEntries.forEach((entry) => {
+      nodeOrder.set(entry.id, entry.order);
+    });
+
+    const nodeIds = new Set(layoutEntries.map((entry) => entry.id));
+    const outgoingEdgesBySource = new Map<
+      string,
+      { id: string; to: string; isConditional: boolean }[]
+    >();
+    layoutEdges.forEach((edge) => {
+      if (
+        !nodeIds.has(edge.from) ||
+        !nodeIds.has(edge.to) ||
+        edge.from === edge.to
+      ) {
+        return;
+      }
+      const list = outgoingEdgesBySource.get(edge.from) ?? [];
+      list.push({
+        id: edge.id,
+        to: edge.to,
+        isConditional: Boolean(edge.when?.expression),
+      });
+      outgoingEdgesBySource.set(edge.from, list);
+    });
+    const edgeBranchOffsets = new Map<string, number>();
+    outgoingEdgesBySource.forEach((edges) => {
+      const conditionalEdges = edges.filter((edge) => edge.isConditional);
+      if (conditionalEdges.length < 2) {
+        return;
+      }
+      conditionalEdges.sort((a, b) => {
+        const order =
+          (nodeOrder.get(a.to) ?? 0) - (nodeOrder.get(b.to) ?? 0);
+        if (order !== 0) {
+          return order;
+        }
+        return a.id.localeCompare(b.id);
+      });
+      const baseOffset = 0.2;
+      conditionalEdges.forEach((edge, index) => {
+        const offset = baseOffset + index * 0.6;
+        edgeBranchOffsets.set(edge.id, offset);
+      });
+    });
+    const incoming = new Map<string, Set<string>>();
+    const outgoing = new Map<string, Set<string>>();
+    const incomingEdges = new Map<
+      string,
+      { from: string; isConditional: boolean; branchOffset: number }[]
+    >();
+    layoutEntries.forEach((entry) => {
+      incoming.set(entry.id, new Set());
+      outgoing.set(entry.id, new Set());
+      incomingEdges.set(entry.id, []);
+    });
+    layoutEdges.forEach((edge) => {
+      if (
+        !nodeIds.has(edge.from) ||
+        !nodeIds.has(edge.to) ||
+        edge.from === edge.to
+      ) {
+        return;
+      }
+      incoming.get(edge.to)?.add(edge.from);
+      outgoing.get(edge.from)?.add(edge.to);
+      incomingEdges.get(edge.to)?.push({
+        from: edge.from,
+        isConditional: Boolean(edge.when?.expression),
+        branchOffset: edgeBranchOffsets.get(edge.id) ?? 0,
+      });
+    });
+
+    const incomingCount = new Map<string, number>();
+    layoutEntries.forEach((entry) => {
+      incomingCount.set(entry.id, incoming.get(entry.id)?.size ?? 0);
+    });
+    const queue = layoutEntries
+      .filter((entry) => (incomingCount.get(entry.id) ?? 0) === 0)
+      .map((entry) => entry.id)
+      .sort((a, b) => (nodeOrder.get(a) ?? 0) - (nodeOrder.get(b) ?? 0));
+    const topoOrder: string[] = [];
+
+    while (queue.length > 0) {
+      const current = queue.shift() as string;
+      topoOrder.push(current);
+      const nextTargets = outgoing.get(current) ?? new Set<string>();
+      nextTargets.forEach((target) => {
+        const nextCount = (incomingCount.get(target) ?? 0) - 1;
+        incomingCount.set(target, nextCount);
+        if (nextCount === 0) {
+          queue.push(target);
+        }
+      });
+      queue.sort(
+        (a, b) => (nodeOrder.get(a) ?? 0) - (nodeOrder.get(b) ?? 0)
+      );
+    }
+
+    layoutEntries
+      .map((entry) => entry.id)
+      .filter((id) => !topoOrder.includes(id))
+      .sort((a, b) => (nodeOrder.get(a) ?? 0) - (nodeOrder.get(b) ?? 0))
+      .forEach((id) => topoOrder.push(id));
+
+    const columns = new Map<string, number>();
+    topoOrder.forEach((nodeId) => {
+      const parents = incomingEdges.get(nodeId) ?? [];
+      let column = 0;
+      parents.forEach(({ from, isConditional, branchOffset }) => {
+        const parentColumn = columns.get(from) ?? 0;
+        const candidate =
+          parentColumn + (isConditional ? 1 : 0) + branchOffset;
+        column = Math.max(column, candidate);
+      });
+      columns.set(nodeId, column);
+    });
+
+    const hasConditionalEdges = layoutEdges.some(
+      (edge) => edge.when?.expression
+    );
+    const columnSpacing = 280;
+    const rowSpacing = hasConditionalEdges ? 200 : 180;
+    const marginX = 80;
+    const marginY = 80;
+    const nextPositions = new Map<string, { x: number; y: number }>();
+    layoutEntries.forEach((entry) => {
+      const order = nodeOrder.get(entry.id) ?? 0;
+      const column = columns.get(entry.id) ?? 0;
+      nextPositions.set(entry.id, {
+        x: marginX + column * columnSpacing,
+        y: marginY + order * rowSpacing,
+      });
+    });
+
+    const positionsByFlowId = new Map<
+      string,
+      Map<string, { x: number; y: number }>
+    >();
+    layoutEntries.forEach((entry) => {
+      const position = nextPositions.get(entry.id);
+      if (!position) {
+        return;
+      }
+      const flowPositions =
+        positionsByFlowId.get(entry.flowId) ??
+        new Map<string, { x: number; y: number }>();
+      const prefix = `${entry.flowId}::`;
+      const sourceId = entry.id.startsWith(prefix)
+        ? entry.id.slice(prefix.length)
+        : entry.id;
+      flowPositions.set(sourceId, position);
+      positionsByFlowId.set(entry.flowId, flowPositions);
+    });
+
+    setLibrary((prev) => ({
+      ...prev,
+      flows: prev.flows.map((flow) => {
+        const positions = positionsByFlowId.get(flow.id);
+        if (!positions) {
+          return flow;
+        }
+        return {
+          ...flow,
+          nodes: flow.nodes.map((node) =>
+            positions.has(node.id)
+              ? { ...node, position: positions.get(node.id) }
+              : node
+          ),
+        };
+      }),
+    }));
+    pendingFitRef.current = true;
+  }, [activeFlow, canvasDefinition, showCombinedFlow]);
+
+  const handleToggleFullscreen = useCallback(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {
+        notify("Fullscreen verlaten mislukt.", {
+          tone: "warning",
+          title: "Fullscreen",
+        });
+      });
+      return;
+    }
+    const target = fullscreenContainerRef.current;
+    if (!target?.requestFullscreen) {
+      notify("Fullscreen wordt niet ondersteund door je browser.", {
+        tone: "warning",
+        title: "Fullscreen",
+      });
+      return;
+    }
+    target.requestFullscreen().catch(() => {
+      notify("Fullscreen starten mislukt.", {
+        tone: "warning",
+        title: "Fullscreen",
+      });
+    });
+  }, [notify]);
 
   const handleCenterSelection = useCallback(() => {
     const instance = flowInstanceRef.current;
@@ -1636,10 +2598,17 @@ export default function QuestionMapVisualPage() {
       removeEdge(activeFlow.id, selectedEdgeId);
       return;
     }
-    if (selectedNodeId) {
+    if (selectedNodeId && !selectedNodeIsLocked) {
       removeNodeFromFlow(activeFlow.id, selectedNodeId);
     }
-  }, [activeFlow, selectedEdgeId, selectedNodeId]);
+  }, [
+    activeFlow,
+    removeEdge,
+    removeNodeFromFlow,
+    selectedEdgeId,
+    selectedNodeId,
+    selectedNodeIsLocked,
+  ]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -1659,7 +2628,7 @@ export default function QuestionMapVisualPage() {
       }
       const key = event.key.toLowerCase();
       if (key === "delete" || key === "backspace") {
-        if (selectedNodeId || selectedEdgeId) {
+        if (canDeleteSelection) {
           event.preventDefault();
           handleDeleteSelection();
         }
@@ -1678,7 +2647,7 @@ export default function QuestionMapVisualPage() {
         handleRedo();
       }
     },
-    [handleDeleteSelection, handleRedo, handleUndo, selectedEdgeId, selectedNodeId]
+    [canDeleteSelection, handleDeleteSelection, handleRedo, handleUndo]
   );
 
   useEffect(() => {
@@ -1693,16 +2662,21 @@ export default function QuestionMapVisualPage() {
     ({ nodes: selectedNodes, edges: selectedEdges }: OnSelectionChangeParams) => {
       const selectedNode = selectedNodes[0];
       const selectedEdge = selectedEdges[0];
-      if (selectedNode && activeFlow) {
-        const nodeQuestionId =
-          activeFlow.nodes.find((item) => item.id === selectedNode.id)
-            ?.questionId ?? null;
+      if (selectedNode) {
+        const meta = canvasDefinition.nodeMetaById.get(selectedNode.id);
         setSelectedNodeId(selectedNode.id);
-        setSelectedQuestionId(nodeQuestionId);
+        setSelectedQuestionId(meta?.questionId ?? null);
         setSelectedEdgeId(null);
         return;
       }
       if (selectedEdge) {
+        const meta = canvasDefinition.edgeMetaById.get(selectedEdge.id);
+        if (meta?.isLocked) {
+          setSelectedNodeId(null);
+          setSelectedQuestionId(null);
+          setSelectedEdgeId(null);
+          return;
+        }
         setSelectedEdgeId(selectedEdge.id);
         setSelectedNodeId(null);
         setSelectedQuestionId(null);
@@ -1712,28 +2686,34 @@ export default function QuestionMapVisualPage() {
       setSelectedQuestionId(null);
       setSelectedEdgeId(null);
     },
-    [activeFlow]
+    [canvasDefinition.edgeMetaById, canvasDefinition.nodeMetaById]
   );
 
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node) => {
-      if (!activeFlow) {
+      const meta = canvasDefinition.nodeMetaById.get(node.id);
+      if (!meta) {
         return;
       }
-      const nodeQuestionId =
-        activeFlow.nodes.find((item) => item.id === node.id)?.questionId ?? null;
       setSelectedNodeId(node.id);
-      setSelectedQuestionId(nodeQuestionId);
+      setSelectedQuestionId(meta.questionId);
       setSelectedEdgeId(null);
     },
-    [activeFlow]
+    [canvasDefinition.nodeMetaById]
   );
 
-  const handleEdgeClick = useCallback((_event: unknown, edge: Edge) => {
-    setSelectedEdgeId(edge.id);
-    setSelectedNodeId(null);
-    setSelectedQuestionId(null);
-  }, []);
+  const handleEdgeClick = useCallback(
+    (_event: unknown, edge: Edge) => {
+      const meta = canvasDefinition.edgeMetaById.get(edge.id);
+      if (meta?.isLocked) {
+        return;
+      }
+      setSelectedEdgeId(edge.id);
+      setSelectedNodeId(null);
+      setSelectedQuestionId(null);
+    },
+    [canvasDefinition.edgeMetaById]
+  );
 
   const handlePaneClick = useCallback(() => {
     setSelectedNodeId(null);
@@ -1752,16 +2732,25 @@ export default function QuestionMapVisualPage() {
       setSelectedQuestionId(questionId);
       setSelectedEdgeId(null);
       const flowNodeId =
-        activeFlow?.nodes.find((node) => node.questionId === questionId)?.id ??
-        null;
+        canvasDefinition.nodeEntries.find(
+          (entry) => entry.questionId === questionId
+        )?.node.id ?? null;
       setSelectedNodeId(flowNodeId);
     },
-    [activeFlow, selectedQuestionId]
+    [canvasDefinition.nodeEntries, selectedQuestionId]
   );
 
   const libraryItems = filteredQuestions.map((question) => {
     const isSelected = question.id === selectedQuestionId;
     const isInFlow = flowQuestionIds.has(question.id);
+    const isExcluded = excludedQuestionIds.has(question.id);
+    const resolution = questionResolutionById.get(question.id);
+    const isExcludedInCombined = Boolean(resolution?.isExcluded);
+    const isActiveViaOtherFlow =
+      resolution &&
+      !resolution.isExcluded &&
+      resolution.flowId !== activeFlow?.id;
+    const addLabel = isActiveViaOtherFlow ? "ontgrendelen" : "+ toevoegen";
     const canDelete = (usageMap.get(question.id) ?? 0) === 0;
     return (
       <div
@@ -1819,18 +2808,41 @@ export default function QuestionMapVisualPage() {
             className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
               isInFlow
                 ? "bg-emerald-100 text-emerald-700"
+                : isActiveViaOtherFlow
+                ? "bg-sky-100 text-sky-700"
                 : "bg-slate-100 text-slate-500"
             }`}
           >
-            {isInFlow ? "in flow" : "niet gekoppeld"}
+            {isInFlow
+              ? "in flow"
+              : isActiveViaOtherFlow
+              ? `actief via ${resolution?.label ?? "basis"}`
+              : "niet gekoppeld"}
           </span>
+          {isExcludedInCombined ? (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+              uitgesloten
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={() => handleAddToActiveFlow(question.id)}
             disabled={!activeSlot || isInFlow}
             className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
           >
-            + toevoegen
+            {addLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleExclusionForActiveScope(question.id)}
+            disabled={!canToggleExclusions}
+            className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold transition ${
+              isExcluded
+                ? "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            {isExcluded ? "toon hier" : "uitsluiten"}
           </button>
         </div>
       </div>
@@ -1853,7 +2865,7 @@ export default function QuestionMapVisualPage() {
     : "Kies een vraag";
   const edgeConditionLabel = edgeCondition ? edgeCondition : "altijd";
   const selectedNodeLabel = selectedNodeId
-    ? nodeLabelMap.get(selectedNodeId) ?? selectedNodeId
+    ? canvasNodeLabelMap.get(selectedNodeId) ?? selectedNodeId
     : "";
   const selectedEdgeSummary = useMemo(() => {
     if (!selectedEdgeId || !activeFlow) {
@@ -1905,9 +2917,22 @@ export default function QuestionMapVisualPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e2e8f0_100%)] px-6 py-16 text-slate-900">
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div
+      ref={fullscreenContainerRef}
+      className={`min-h-screen bg-[radial-gradient(circle_at_top,_#fff7ed,_#f8fafc_45%,_#e2e8f0_100%)] px-6 ${
+        isFullscreen ? "py-6" : "py-16"
+      } text-slate-900`}
+    >
+      <main
+        className={`mx-auto flex w-full flex-col gap-8 ${
+          isCanvasExpanded ? "max-w-none" : "max-w-7xl"
+        }`}
+      >
+        <header
+          className={`flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between ${
+            isCanvasExpanded ? "hidden" : ""
+          }`}
+        >
           <div className="space-y-3">
             <p className="text-sm uppercase tracking-[0.3em] text-slate-500">
               Wizard setup
@@ -1941,7 +2966,11 @@ export default function QuestionMapVisualPage() {
 
         <section className="rounded-3xl border border-white/60 bg-white/70 p-6 shadow-xl shadow-slate-200 backdrop-blur">
           <div className="space-y-6">
-            <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+            <div
+              className={`rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm ${
+                isCanvasExpanded ? "hidden" : ""
+              }`}
+            >
               <div className="grid gap-4 md:grid-cols-3">
                 <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
                   Categorie
@@ -2110,6 +3139,11 @@ export default function QuestionMapVisualPage() {
                       <span className="rounded-full border border-slate-200 bg-white px-3 py-1">
                         Relaties: {flowEdgeCount}
                       </span>
+                      {canToggleExclusions && excludedQuestionIds.size > 0 ? (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+                          Uitsluitingen: {excludedQuestionIds.size}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                   {hasActiveFlow ? (
@@ -2121,14 +3155,50 @@ export default function QuestionMapVisualPage() {
                       >
                         {showNodeOrder ? "Nummers verbergen" : "Nummers tonen"}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowEdgeLabels((prev) => !prev)}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                      >
+                        {showEdgeLabels
+                          ? "Voorwaarden verbergen"
+                          : "Voorwaarden tonen"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowCombinedFlow((prev) => !prev)}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                      >
+                        {showCombinedFlow
+                          ? "Alleen deze scope"
+                          : "Toon basis + scope"}
+                      </button>
+                      {showCombinedFlow && hasCanvasGlobalFlow ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowGlobalGhosts((prev) => !prev)}
+                          aria-pressed={showGlobalGhosts}
+                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                        >
+                          {showGlobalGhosts
+                            ? "Global schaduw verbergen"
+                            : "Global schaduw tonen"}
+                        </button>
+                      ) : null}
                       <span className="text-[10px] text-slate-400">
-                        Nummers tonen de volgorde van deze flow.
+                        {showCombinedFlow
+                          ? "Basis (global + bovenliggende scopes) staat op slot."
+                          : "Nummers tonen de volgorde van deze flow."}
                       </span>
                     </div>
                   ) : null}
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600 shadow-sm">
+                <div
+                  className={`rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600 shadow-sm ${
+                    isCanvasExpanded ? "hidden" : ""
+                  }`}
+                >
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
                       Snelle start
@@ -2200,9 +3270,11 @@ export default function QuestionMapVisualPage() {
                       <p>
                         Global is de basis voor iedereen. Categorie, context en
                         opstelling voegen extra vragen toe voor deze selectie.
+                        Gebruik &quot;Uitsluiten&quot; om globale vragen te verbergen of
+                        &quot;Ontgrendelen&quot; om ze lokaal te bewerken.
                       </p>
                       <ul className="space-y-1">
-                        <li>Voeg vragen toe met "+ toevoegen" links.</li>
+                        <li>Voeg vragen toe met &quot;+ toevoegen&quot; links.</li>
                         <li>
                           Sleep vragen om te verplaatsen; sleep lege ruimte om te
                           schuiven.
@@ -2210,14 +3282,18 @@ export default function QuestionMapVisualPage() {
                         <li>Zoom met het muiswiel of met de knoppen.</li>
                         <li>
                           Maak een relatie: sleep van het punt of gebruik
-                          "Relatie maken".
+                          &quot;Relatie maken&quot;.
+                        </li>
+                        <li>
+                          Uitsluiten of ontgrendelen: selecteer een vraag en
+                          kies de juiste actie voor deze scope.
                         </li>
                         <li>Verwijderen: selecteer en druk op Delete.</li>
                         <li>Ongedaan: Ctrl+Z, opnieuw: Ctrl+Y.</li>
                       </ul>
                       <p>
-                        Relatie betekent: na het beantwoorden van de "van vraag"
-                        wordt de "naar vraag" zichtbaar. Voorwaarde is
+                        Relatie betekent: na het beantwoorden van de &quot;van vraag&quot;
+                        wordt de &quot;naar vraag&quot; zichtbaar. Voorwaarde is
                         optioneel; zonder relaties is alles zichtbaar in de
                         flow-volgorde (nummers zijn alleen visueel).
                       </p>
@@ -2284,7 +3360,7 @@ export default function QuestionMapVisualPage() {
                           <button
                             type="button"
                             onClick={handleDeleteSelection}
-                            disabled={!selectedNodeId && !selectedEdgeId}
+                            disabled={!canDeleteSelection}
                             className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-[11px] font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-50"
                             title="Verwijder selectie"
                           >
@@ -2301,6 +3377,15 @@ export default function QuestionMapVisualPage() {
                             title="Centreren op selectie"
                           >
                             Centreren
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleAutoLayout}
+                            disabled={!activeFlow || activeFlow.nodes.length === 0}
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                            title="Automatische layout"
+                          >
+                            Auto layout
                           </button>
                           <button
                             type="button"
@@ -2347,15 +3432,27 @@ export default function QuestionMapVisualPage() {
                                 : "Bibliotheek"}
                             </button>
                           ) : null}
+                          {isCanvasExpanded ? (
+                            <button
+                              type="button"
+                              onClick={() => setShowPreview((prev) => !prev)}
+                              className={`hidden rounded-full border px-3 py-1 text-[11px] font-semibold transition lg:inline-flex ${
+                                showPreview
+                                  ? "border-slate-900 bg-slate-900 text-white"
+                                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                              }`}
+                              title="Preview stap 3"
+                            >
+                              {showPreview ? "Preview sluiten" : "Preview"}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
-                            onClick={() =>
-                              setIsCanvasExpanded((prev) => !prev)
-                            }
+                            onClick={handleToggleFullscreen}
                             className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
-                            title="Vergroot of verklein het canvas"
+                            title="Volledig scherm aan of uit"
                           >
-                            {isCanvasExpanded ? "Canvas normaal" : "Canvas groot"}
+                            {isFullscreen ? "Scherm normaal" : "Volledig scherm"}
                           </button>
                         </div>
                         {selectedNodeId || selectedEdgeId ? (
@@ -2374,9 +3471,123 @@ export default function QuestionMapVisualPage() {
                       </div>
                       <div
                         className={`relative ${
-                          isCanvasExpanded ? "h-[75vh]" : "h-[560px]"
+                          isCanvasExpanded
+                            ? "h-[calc(100vh-200px)]"
+                            : "h-[560px]"
                         }`}
                       >
+                        {isCanvasExpanded ? (
+                          <div className="pointer-events-none absolute right-4 top-4 bottom-4 z-20 flex w-80 flex-col gap-3">
+                            <div className="pointer-events-auto w-full rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                Scope selectie
+                              </p>
+                              <div className="mt-2 space-y-2">
+                                <label className="flex flex-col gap-1 text-[11px] font-semibold text-slate-600">
+                                  Categorie
+                                  <select
+                                    value={scope.categoryId}
+                                    onChange={(event) => {
+                                      const nextCategory = event.target.value;
+                                      if (!nextCategory) {
+                                        setScope({
+                                          categoryId: "",
+                                          contextId: "",
+                                          installationId: "",
+                                        });
+                                        return;
+                                      }
+                                      const nextContexts =
+                                        config.contextsByCategory[nextCategory] ?? [];
+                                      const nextContext = nextContexts[0]?.id ?? "";
+                                      const nextInstallations = nextContext
+                                        ? config.installationsByContext[nextContext] ??
+                                          []
+                                        : [];
+                                      setScope({
+                                        categoryId: nextCategory,
+                                        contextId: nextContext,
+                                        installationId: nextInstallations[0] ?? "",
+                                      });
+                                    }}
+                                    className="h-8 rounded-xl border border-slate-200 bg-white px-2 text-[11px] text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                                  >
+                                    <option value="">Geen</option>
+                                    {config.categories.map((category) => (
+                                      <option key={category.id} value={category.id}>
+                                        {category.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="flex flex-col gap-1 text-[11px] font-semibold text-slate-600">
+                                  Context
+                                  <select
+                                    value={scope.contextId}
+                                    onChange={(event) => {
+                                      const nextContext = event.target.value;
+                                      if (!nextContext) {
+                                        setScope((prev) => ({
+                                          ...prev,
+                                          contextId: "",
+                                          installationId: "",
+                                        }));
+                                        return;
+                                      }
+                                      const nextInstallations =
+                                        config.installationsByContext[nextContext] ??
+                                        [];
+                                      setScope((prev) => ({
+                                        ...prev,
+                                        contextId: nextContext,
+                                        installationId: nextInstallations[0] ?? "",
+                                      }));
+                                    }}
+                                    className="h-8 rounded-xl border border-slate-200 bg-white px-2 text-[11px] text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                                    disabled={!scope.categoryId}
+                                  >
+                                    <option value="">Geen</option>
+                                    {contextsForCategory.map((context) => (
+                                      <option key={context.id} value={context.id}>
+                                        {context.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="flex flex-col gap-1 text-[11px] font-semibold text-slate-600">
+                                  Opstelling
+                                  <select
+                                    value={scope.installationId}
+                                    onChange={(event) =>
+                                      setScope((prev) => ({
+                                        ...prev,
+                                        installationId: event.target.value,
+                                      }))
+                                    }
+                                    className="h-8 rounded-xl border border-slate-200 bg-white px-2 text-[11px] text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                                    disabled={!scope.contextId}
+                                  >
+                                    <option value="">Geen</option>
+                                    {installationsForContext.map((installation) => (
+                                      <option key={installation} value={installation}>
+                                        {config.installationLabels[installation] ??
+                                          installation}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                              <p className="mt-2 text-[11px] text-slate-500">
+                                Actief: {activeSlot?.label ?? "Onbekend"}
+                              </p>
+                            </div>
+                            {showPreview ? (
+                              <div className="pointer-events-auto flex min-h-0 flex-1 flex-col">
+                                {previewPanel}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
                         {isCanvasExpanded && showLibraryOverlay ? (
                           <div className="pointer-events-auto absolute left-4 top-4 bottom-4 z-20 hidden w-72 flex-col rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur lg:flex">
                             <div className="flex h-full flex-col gap-2">
@@ -2450,7 +3661,7 @@ export default function QuestionMapVisualPage() {
                           />
                           <Controls position="bottom-left" showInteractive={false} />
                         </ReactFlow>
-                        {hasActiveFlow && !hasFlowNodes ? (
+                        {hasActiveFlow && !hasFlowNodes && !hasCanvasNodes ? (
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
                             <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-dashed border-slate-200 bg-white/90 px-5 py-4 text-center text-sm text-slate-600 shadow-sm">
                               <p className="text-base font-semibold text-slate-800">
@@ -2506,112 +3717,7 @@ export default function QuestionMapVisualPage() {
                     {showPreview ? "verberg" : "toon"}
                   </button>
                 </div>
-                {showPreview ? (
-                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                    <div className="space-y-3 text-xs text-slate-600">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                          Preview stap 3
-                        </p>
-                        <span className="text-[11px] text-slate-400">
-                          {previewFlowSummary || "geen flow"}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500">
-                        Zo ziet de vragenlijst eruit voor deze selectie. Relaties
-                        kunnen vragen verbergen.
-                      </p>
-                      <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
-                        <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
-                          {previewStats.total} vragen
-                        </span>
-                        <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
-                          {previewStats.conditional} voorwaardelijk
-                        </span>
-                      </div>
-                      {previewMissingFlowLabels.length > 0 ? (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-                          Geen flow voor:{" "}
-                          {previewMissingFlowLabels.join(", ")}.
-                        </div>
-                      ) : null}
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowNodeOrder((prev) => !prev)}
-                          className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
-                        >
-                          {showNodeOrder ? "Nummers verbergen" : "Nummers tonen"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowConditions((prev) => !prev)}
-                          className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
-                        >
-                          {showConditions
-                            ? "Voorwaarden verbergen"
-                            : "Voorwaarden tonen"}
-                        </button>
-                      </div>
-                      <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
-                        {previewQuestions.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-                            Nog geen vragen gevonden voor deze selectie.
-                          </div>
-                        ) : (
-                          previewQuestions.map((item) => {
-                            const kindLabel = item.question
-                              ? questionKindLabels[item.question.kind]
-                              : "Onbekend";
-                            return (
-                              <div
-                                key={item.nodeId}
-                                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex items-start gap-2">
-                                    {showNodeOrder ? (
-                                      <span className="mt-0.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                                        {item.order}
-                                      </span>
-                                    ) : null}
-                                    <div>
-                                      <p className="text-[12px] font-semibold text-slate-700">
-                                        {item.question?.prompt ?? item.nodeId}
-                                      </p>
-                                      <p className="text-[11px] text-slate-400">
-                                        {item.question?.conceptKey ??
-                                          item.nodeId}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className="flex flex-col items-end gap-1">
-                                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                                      {kindLabel}
-                                    </span>
-                                    {item.isConditional ? (
-                                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
-                                        voorwaardelijk
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                </div>
-                                {showConditions && item.isConditional ? (
-                                  <p className="mt-2 text-[11px] text-slate-500">
-                                    Voorwaarde:{" "}
-                                    {item.conditions.length > 0
-                                      ? item.conditions.join(" | ")
-                                      : "geen specifieke regel"}
-                                  </p>
-                                ) : null}
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+                {showPreview ? previewPanel : null}
                 <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Inspector
                 </h2>
@@ -2713,22 +3819,31 @@ export default function QuestionMapVisualPage() {
                                 <option value="multi">Multi choice</option>
                               </select>
                             </label>
-                            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                              Tags
-                              <input
-                                value={joinList(selectedQuestion.tags)}
-                                onChange={(event) =>
-                                  updateQuestion(selectedQuestion.id, {
-                                    tags: splitList(event.target.value),
-                                  })
-                                }
-                                placeholder="bijv. materiaal, compliance"
-                                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                              />
-                            </label>
-                            {activeFlow ? (
-                              flowQuestionIds.has(selectedQuestion.id) ? (
-                                <button
+                          <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                            Tags
+                            <input
+                              value={joinList(selectedQuestion.tags)}
+                              onChange={(event) =>
+                                updateQuestion(selectedQuestion.id, {
+                                  tags: splitList(event.target.value),
+                                })
+                              }
+                              placeholder="bijv. materiaal, compliance"
+                              className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                            />
+                          </label>
+                          {selectedQuestionResolution ? (
+                            <p className="text-xs text-slate-500">
+                              {selectedQuestionResolution.isExcluded
+                                ? `Uitgesloten in ${selectedQuestionResolution.label}.`
+                                : selectedQuestionIsLocked
+                                ? `Actief via ${selectedQuestionResolution.label} (op slot).`
+                                : "Actief in deze scope."}
+                            </p>
+                          ) : null}
+                          {activeFlow ? (
+                            flowQuestionIds.has(selectedQuestion.id) ? (
+                              <button
                                   type="button"
                                   onClick={() => {
                                     const nodeId = activeFlow.nodes.find(
@@ -2747,18 +3862,34 @@ export default function QuestionMapVisualPage() {
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    activeFlow
-                                      ? addQuestionToFlow(
-                                          activeFlow.id,
-                                          selectedQuestion.id
-                                        )
-                                      : null
+                                    handleAddToActiveFlow(selectedQuestion.id)
                                   }
                                   className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
                                 >
-                                  Toevoegen aan flow
+                                  {selectedQuestionIsLocked
+                                    ? "Ontgrendelen voor deze scope"
+                                    : "Toevoegen aan flow"}
                                 </button>
                               )
+                            ) : null}
+                            {canToggleExclusions ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  toggleExclusionForActiveScope(
+                                    selectedQuestion.id
+                                  )
+                                }
+                                className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                                  excludedQuestionIds.has(selectedQuestion.id)
+                                    ? "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100"
+                                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                                }`}
+                              >
+                                {excludedQuestionIds.has(selectedQuestion.id)
+                                  ? "Toon in deze scope"
+                                  : "Uitsluiten voor deze scope"}
+                              </button>
                             ) : null}
                             <button
                               type="button"
@@ -2973,10 +4104,10 @@ export default function QuestionMapVisualPage() {
                         </p>
                         <p className="mt-2 text-[11px] text-slate-500">
                           Relatie bepaalt volgorde: na het beantwoorden van de
-                          "van vraag" wordt de "naar vraag" zichtbaar. Laat
+                          &quot;van vraag&quot; wordt de &quot;naar vraag&quot; zichtbaar. Laat
                           voorwaarde leeg om altijd door te gaan. Je kan ook
                           verbinden door het punt van een vraag te slepen. Tip:
-                          klik twee vragen om "van" en "naar" te vullen.
+                          klik twee vragen om &quot;van&quot; en &quot;naar&quot; te vullen.
                         </p>
                         {activeFlow.nodes.length < 2 ? (
                           <p className="mt-2 text-sm text-slate-500">
@@ -2989,6 +4120,11 @@ export default function QuestionMapVisualPage() {
                                 <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
                                   Geselecteerd: {selectedNodeLabel}
                                 </span>
+                                {selectedNodeIsLocked ? (
+                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                                    Op slot: ontgrendel om relaties te maken.
+                                  </span>
+                                ) : null}
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -2997,7 +4133,8 @@ export default function QuestionMapVisualPage() {
                                       from: selectedNodeId,
                                     }))
                                   }
-                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                                  disabled={selectedNodeIsLocked}
+                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                   Gebruik als start
                                 </button>
@@ -3009,7 +4146,8 @@ export default function QuestionMapVisualPage() {
                                       to: selectedNodeId,
                                     }))
                                   }
-                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                                  disabled={selectedNodeIsLocked}
+                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                   Gebruik als doel
                                 </button>

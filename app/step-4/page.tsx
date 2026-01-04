@@ -1,14 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWizard } from "../wizard/WizardContext";
 import WizardStepIndicator from "../wizard/WizardStepIndicator";
 import { loadWizardConfig } from "../../src/lib/wizardConfigStorage";
-import {
-  defaultWizardConfig,
-  type WizardConfig,
-} from "../../src/config/wizardConfig.default";
+import { type WizardConfig } from "../../src/config/wizardConfig.default";
 
 type SelectOption = { value: string; label: string };
 
@@ -133,15 +130,11 @@ export default function StepFourPage() {
   const router = useRouter();
   const { projectInfo, stepTwo, stepThree, stepFour, setStepFour } =
     useWizard();
-  const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
+  const [config] = useState<WizardConfig>(() => loadWizardConfig());
   const wizardSnapshot = useMemo(
     () => ({ projectInfo, stepTwo, stepThree, stepFour }),
     [projectInfo, stepTwo, stepThree, stepFour]
   );
-
-  useEffect(() => {
-    setConfig(loadWizardConfig());
-  }, []);
 
   const handleExport = () => {
     const fileBase = projectInfo.projectNumber.trim() || "project";
@@ -170,6 +163,11 @@ export default function StepFourPage() {
       },
     });
   };
+
+  const handleSelectComponent =
+    <K extends keyof typeof stepFour.components>(key: K) =>
+    (value: string) =>
+      updateComponent(key, value as (typeof stepFour.components)[K]);
 
   const updateOption = <K extends keyof typeof stepFour.options>(
     key: K,
@@ -414,31 +412,31 @@ export default function StepFourPage() {
               label="Dakconstructie"
               value={stepFour.components.roof}
               options={roofOptions}
-              onChange={(value) => updateComponent("roof", value)}
+              onChange={handleSelectComponent("roof")}
             />
             <SelectField
               label="Staanders & liggers"
               value={stepFour.components.columnsAndBeams}
               options={columnOptions}
-              onChange={(value) => updateComponent("columnsAndBeams", value)}
+              onChange={handleSelectComponent("columnsAndBeams")}
             />
             <SelectField
               label="Wand- of zijelementen"
               value={stepFour.components.sidePanels}
               options={sidePanelOptions}
-              onChange={(value) => updateComponent("sidePanels", value)}
+              onChange={handleSelectComponent("sidePanels")}
             />
             <SelectField
               label="Waterafvoer"
               value={stepFour.components.waterDrainage}
               options={drainageOptions}
-              onChange={(value) => updateComponent("waterDrainage", value)}
+              onChange={handleSelectComponent("waterDrainage")}
             />
             <SelectField
               label="Verlichting"
               value={stepFour.components.lighting}
               options={lightingOptions}
-              onChange={(value) => updateComponent("lighting", value)}
+              onChange={handleSelectComponent("lighting")}
             />
           </div>
         );
@@ -459,7 +457,7 @@ export default function StepFourPage() {
               label="Bekledingspanelen"
               value={stepFour.components.claddingPanels}
               options={claddingOptions}
-              onChange={(value) => updateComponent("claddingPanels", value)}
+              onChange={handleSelectComponent("claddingPanels")}
             />
             <div className="space-y-3">
               <h3 className="text-base font-semibold text-slate-800">
@@ -510,7 +508,7 @@ export default function StepFourPage() {
               label="Afsluitingen / kasten"
               value={stepFour.components.closures}
               options={closureOptions}
-              onChange={(value) => updateComponent("closures", value)}
+              onChange={handleSelectComponent("closures")}
             />
             <div className="space-y-3">
               <h3 className="text-base font-semibold text-slate-800">
@@ -551,13 +549,13 @@ export default function StepFourPage() {
               label="Omkasting / bescherming"
               value={stepFour.components.enclosure}
               options={enclosureOptions}
-              onChange={(value) => updateComponent("enclosure", value)}
+              onChange={handleSelectComponent("enclosure")}
             />
             <SelectField
               label="Onderhouds- en servicetoegang"
               value={stepFour.components.serviceAccess}
               options={serviceAccessOptions}
-              onChange={(value) => updateComponent("serviceAccess", value)}
+              onChange={handleSelectComponent("serviceAccess")}
             />
           </div>
         );
@@ -695,7 +693,7 @@ export default function StepFourPage() {
               label="Tijdelijkheid / demonteerbaarheid"
               value={stepFour.components.temporality}
               options={temporalityOptions}
-              onChange={(value) => updateComponent("temporality", value)}
+              onChange={handleSelectComponent("temporality")}
             />
           </div>
         );

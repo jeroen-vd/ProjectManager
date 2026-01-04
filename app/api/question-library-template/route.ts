@@ -17,7 +17,9 @@ type QuestionLibraryPayload = Partial<QuestionLibrary> & {
   revisionNote?: string;
 };
 
-const normalizeLibrary = (raw: PartialLibrary | null): QuestionLibrary => {
+const normalizeLibrary = (
+  raw: QuestionLibraryPayload | null
+): QuestionLibrary => {
   if (!raw) {
     return defaultQuestionLibrary;
   }

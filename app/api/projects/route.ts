@@ -17,7 +17,7 @@ async function readProjects() {
   try {
     const file = await fs.readFile(dataFile, "utf-8");
     return JSON.parse(file);
-  } catch (error) {
+  } catch {
     return [];
   }
 }

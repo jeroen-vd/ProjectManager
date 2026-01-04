@@ -11,11 +11,12 @@ import {
 export const runtime = "nodejs";
 
 type Params = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export async function GET(_request: Request, { params }: Params) {
-  const revision = await findTemplateRevision(params.id);
+  const { id } = await params;
+  const revision = await findTemplateRevision(id);
   if (!revision) {
     return NextResponse.json(
       { error: "Revisie niet gevonden." },
@@ -26,7 +27,8 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 export async function POST(_request: Request, { params }: Params) {
-  const revision = await findTemplateRevision(params.id);
+  const { id } = await params;
+  const revision = await findTemplateRevision(id);
   if (!revision) {
     return NextResponse.json(
       { error: "Revisie niet gevonden." },
@@ -53,7 +55,8 @@ export async function POST(_request: Request, { params }: Params) {
 }
 
 export async function DELETE(_request: Request, { params }: Params) {
-  const removed = await deleteTemplateRevision(params.id);
+  const { id } = await params;
+  const removed = await deleteTemplateRevision(id);
   if (!removed) {
     return NextResponse.json(
       { error: "Revisie niet gevonden." },

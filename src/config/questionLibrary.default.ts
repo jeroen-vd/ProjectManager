@@ -56,6 +56,7 @@ export type Flow = {
   scope: FlowScope;
   nodes: FlowNode[];
   edges: FlowEdge[];
+  excludedQuestionIds?: string[];
 };
 
 export type QuestionLibrary = {

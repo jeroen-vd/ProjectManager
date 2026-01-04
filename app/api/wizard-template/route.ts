@@ -28,7 +28,7 @@ const buildDefaultContextIconMap = () => {
   return map;
 };
 
-const normalizeConfig = (raw: PartialConfig | null): WizardConfig => {
+const normalizeConfig = (raw: WizardTemplatePayload | null): WizardConfig => {
   if (!raw) {
     return defaultWizardConfig;
   }

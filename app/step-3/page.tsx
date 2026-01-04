@@ -1,17 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWizard } from "../wizard/WizardContext";
 import WizardStepIndicator from "../wizard/WizardStepIndicator";
 import { loadWizardConfig } from "../../src/lib/wizardConfigStorage";
 import { loadQuestionLibrary } from "../../src/lib/questionLibraryStorage";
+import { type WizardConfig } from "../../src/config/wizardConfig.default";
 import {
-  defaultWizardConfig,
-  type WizardConfig,
-} from "../../src/config/wizardConfig.default";
-import {
-  defaultQuestionLibrary,
   type Flow,
   type FlowScope,
   type Question,
@@ -145,18 +141,11 @@ const formatAnswer = (value: AnswerValue) => {
 export default function StepThreePage() {
   const router = useRouter();
   const { stepTwo, stepThree, setStepThree, setStepTwo } = useWizard();
-  const [config, setConfig] = useState<WizardConfig>(defaultWizardConfig);
-  const [library, setLibrary] = useState<QuestionLibrary>(
-    defaultQuestionLibrary
-  );
+  const [config] = useState<WizardConfig>(() => loadWizardConfig());
+  const [library] = useState<QuestionLibrary>(() => loadQuestionLibrary());
   const [showConceptKeys, setShowConceptKeys] = useState(false);
 
-  useEffect(() => {
-    setConfig(loadWizardConfig());
-    setLibrary(loadQuestionLibrary());
-  }, []);
-
-  const answerMap = useMemo(
+  const answerMap = useMemo<Record<string, AnswerValue>>(
     () => ({
       ...stepThree.extras,
       "material.main": stepThree.mainMaterial,
@@ -269,27 +258,116 @@ export default function StepThreePage() {
   }, [library.flows, scopeCandidates]);
 
   const combinedFlow = useMemo(() => {
-    const nodes: Flow["nodes"] = [];
-    const edges: Flow["edges"] = [];
-    const seenQuestionIds = new Set<string>();
-
+    const resolveNodeId = (flowId: string, nodeId: string) =>
+      `${flowId}::${nodeId}`;
+    const flowNodeInfoByFlowId = new Map<
+      string,
+      Map<string, { questionId: string; resolvedId: string }>
+    >();
+    const flowQuestionIdsByFlowId = new Map<string, Set<string>>();
     mergedFlows.forEach(({ flow }) => {
+      const questionIds = new Set<string>();
+      const flowNodeInfo = new Map<
+        string,
+        { questionId: string; resolvedId: string }
+      >();
       flow.nodes.forEach((node) => {
-        if (seenQuestionIds.has(node.questionId)) {
-          return;
-        }
-        seenQuestionIds.add(node.questionId);
-        nodes.push(node);
+        flowNodeInfo.set(node.id, {
+          questionId: node.questionId,
+          resolvedId: resolveNodeId(flow.id, node.id),
+        });
+        questionIds.add(node.questionId);
       });
-      edges.push(...flow.edges);
+      flowNodeInfoByFlowId.set(flow.id, flowNodeInfo);
+      flowQuestionIdsByFlowId.set(flow.id, questionIds);
     });
 
-    const nodeIds = new Set(nodes.map((node) => node.id));
-    const filteredEdges = edges.filter(
-      (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)
-    );
+    const decisionByQuestionId = new Map<
+      string,
+      { nodeId?: string; isExcluded: boolean }
+    >();
+    [...mergedFlows].reverse().forEach(({ flow }) => {
+      const flowQuestionIds = flowQuestionIdsByFlowId.get(flow.id) ?? new Set();
+      const flowNodeInfo = flowNodeInfoByFlowId.get(flow.id) ?? new Map();
+      flow.nodes.forEach((node) => {
+        const info = flowNodeInfo.get(node.id);
+        if (!info) {
+          return;
+        }
+        if (!decisionByQuestionId.has(node.questionId)) {
+          decisionByQuestionId.set(node.questionId, {
+            nodeId: info.resolvedId,
+            isExcluded: false,
+          });
+        }
+      });
+      (flow.excludedQuestionIds ?? []).forEach((questionId) => {
+        if (flowQuestionIds.has(questionId)) {
+          return;
+        }
+        if (!decisionByQuestionId.has(questionId)) {
+          decisionByQuestionId.set(questionId, { isExcluded: true });
+        }
+      });
+    });
 
-    return { nodes, edges: filteredEdges };
+    const winningNodeIdByQuestionId = new Map<string, string>();
+    decisionByQuestionId.forEach((decision, questionId) => {
+      if (!decision.isExcluded && decision.nodeId) {
+        winningNodeIdByQuestionId.set(questionId, decision.nodeId);
+      }
+    });
+
+    const nodes: Flow["nodes"] = [];
+    mergedFlows.forEach(({ flow }) => {
+      const flowNodeInfo = flowNodeInfoByFlowId.get(flow.id) ?? new Map();
+      flow.nodes.forEach((node) => {
+        const decision = decisionByQuestionId.get(node.questionId);
+        const info = flowNodeInfo.get(node.id);
+        if (
+          !decision ||
+          !info ||
+          decision.isExcluded ||
+          decision.nodeId !== info.resolvedId
+        ) {
+          return;
+        }
+        nodes.push({ ...node, id: info.resolvedId });
+      });
+    });
+
+    const edgeKeys = new Set<string>();
+    const edges: Flow["edges"] = [];
+    let edgeCounter = 0;
+    mergedFlows.forEach(({ flow }) => {
+      const flowNodeInfo = flowNodeInfoByFlowId.get(flow.id) ?? new Map();
+      flow.edges.forEach((edge) => {
+        const fromQuestionId = flowNodeInfo.get(edge.from)?.questionId;
+        const toQuestionId = flowNodeInfo.get(edge.to)?.questionId;
+        if (!fromQuestionId || !toQuestionId) {
+          return;
+        }
+        const fromNodeId = winningNodeIdByQuestionId.get(fromQuestionId);
+        const toNodeId = winningNodeIdByQuestionId.get(toQuestionId);
+        if (!fromNodeId || !toNodeId) {
+          return;
+        }
+        const key = `${fromNodeId}:${toNodeId}:${edge.when?.expression ?? ""}`;
+        if (edgeKeys.has(key)) {
+          return;
+        }
+        edgeKeys.add(key);
+        edges.push({
+          ...edge,
+          id: `${edge.id}-${edgeCounter}`,
+          from: fromNodeId,
+          to: toNodeId,
+        });
+        edgeCounter += 1;
+      });
+    });
+
+    return { nodes, edges };
   }, [mergedFlows]);
 
   const activeFlowQuestions = useMemo<FlowQuestion[]>(() => {
