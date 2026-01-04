@@ -57,6 +57,7 @@ type QuestionNodeData = {
   showOrder?: boolean;
   isLocked?: boolean;
   isGhost?: boolean;
+  isSelected?: boolean;
   flags: {
     duplicate: boolean;
     missingOutputs: boolean;
@@ -77,6 +78,7 @@ const FLOW_LEVELS: FlowScope["level"][] = [
 const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
   const isGhost = Boolean(data.isGhost);
   const isLocked = Boolean(data.isLocked) || isGhost;
+  const isSelected = data.isSelected ?? selected;
   const handleStyle = {
     width: 14,
     height: 14,
@@ -87,10 +89,10 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
   const containerClass = isGhost
     ? "border-slate-200 bg-slate-100 text-slate-500"
     : isLocked
-    ? selected
+    ? isSelected
       ? "border-slate-400 bg-slate-200 text-slate-700 shadow"
       : "border-slate-200 bg-slate-50 text-slate-500"
-    : selected
+    : isSelected
     ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-300"
     : "border-slate-200 bg-white text-slate-700";
   return (
@@ -118,7 +120,7 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
         {data.showOrder && data.order ? (
           <span
             className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-              selected
+              isSelected
                 ? "border-slate-600 bg-slate-800 text-slate-200"
                 : "border-slate-200 bg-white text-slate-500"
             }`}
@@ -129,7 +131,7 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
       </div>
       <p
         className={`text-[11px] ${
-          selected ? "text-slate-300" : "text-slate-500"
+          isSelected ? "text-slate-300" : "text-slate-500"
         }`}
       >
         {data.conceptKey}
@@ -138,7 +140,7 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
         {data.flags.conditional ? (
           <span
             className={`rounded-full px-2 py-0.5 font-semibold ${
-              selected
+              isSelected
                 ? "bg-sky-500/30 text-sky-100"
                 : "bg-sky-100 text-sky-700"
             }`}
@@ -149,7 +151,7 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
         {data.flags.duplicate ? (
           <span
             className={`rounded-full px-2 py-0.5 font-semibold ${
-              selected
+              isSelected
                 ? "bg-rose-500/30 text-rose-100"
                 : "bg-rose-100 text-rose-700"
             }`}
@@ -160,7 +162,7 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
         {data.flags.missingOutputs ? (
           <span
             className={`rounded-full px-2 py-0.5 font-semibold ${
-              selected
+              isSelected
                 ? "bg-amber-500/30 text-amber-100"
                 : "bg-amber-100 text-amber-700"
             }`}
@@ -171,7 +173,7 @@ const QuestionNode = ({ data, selected }: NodeProps<QuestionNodeData>) => {
         {data.flags.orphan ? (
           <span
             className={`rounded-full px-2 py-0.5 font-semibold ${
-              selected
+              isSelected
                 ? "bg-slate-500/30 text-slate-100"
                 : "bg-slate-100 text-slate-600"
             }`}
@@ -532,6 +534,8 @@ export default function QuestionMapVisualPage() {
   >("question");
   const [showHelp, setShowHelp] = useState(true);
   const [showPreview, setShowPreview] = useState(true);
+  const [autoHiddenPreview, setAutoHiddenPreview] = useState(false);
+  const [showInspector, setShowInspector] = useState(true);
   const [showNodeOrder, setShowNodeOrder] = useState(true);
   const [showEdgeLabels, setShowEdgeLabels] = useState(false);
   const [showCombinedFlow, setShowCombinedFlow] = useState(true);
@@ -926,8 +930,8 @@ export default function QuestionMapVisualPage() {
   }, [previewQuestions]);
   const questionResolutionById = previewResolved.decisionByQuestionId;
   const canvasResolutionById = canvasResolved.decisionByQuestionId;
-  const ghostNodeEntries = useMemo(() => {
-    if (!showCombinedFlow || !showGlobalGhosts) {
+  const ghostCandidateEntries = useMemo(() => {
+    if (!showCombinedFlow) {
       return [];
     }
     const entries: {
@@ -961,7 +965,12 @@ export default function QuestionMapVisualPage() {
       });
     });
     return entries;
-  }, [canvasMergedFlows, canvasResolutionById, showCombinedFlow, showGlobalGhosts]);
+  }, [canvasMergedFlows, canvasResolutionById, showCombinedFlow]);
+  const ghostNodeEntries = useMemo(
+    () => (showGlobalGhosts ? ghostCandidateEntries : []),
+    [ghostCandidateEntries, showGlobalGhosts]
+  );
+  const hasGlobalGhostCandidates = ghostCandidateEntries.length > 0;
   const previewPanel = (
     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
       <div className="space-y-3 text-xs text-slate-600">
@@ -1227,9 +1236,12 @@ export default function QuestionMapVisualPage() {
           label: question?.prompt ?? entry.questionId,
           conceptKey: question?.conceptKey ?? entry.questionId,
           questionId: entry.questionId,
-          scopeLabel: isLocked ? entry.flowLabel : undefined,
+          scopeLabel: entry.flowLabel,
           order: index + 1,
           showOrder: showNodeOrder,
+          isSelected:
+            entry.node.id === selectedNodeId ||
+            entry.questionId === selectedQuestionId,
           isLocked,
           flags: {
             conditional: conditionalNodeIds.has(entry.node.id),
@@ -1248,10 +1260,20 @@ export default function QuestionMapVisualPage() {
     const nodePositions = new Map(
       nextNodes.map((node) => [node.id, node.position])
     );
-    const nodeOrder = new Map<string, number>();
-    canvasDefinition.nodeEntries.forEach((entry, index) => {
-      nodeOrder.set(entry.node.id, index);
+    const nodeSortKeys = new Map<
+      string,
+      { y: number; x: number; order: number }
+    >();
+    nextNodes.forEach((node, index) => {
+      const position = nodePositions.get(node.id) ?? buildDefaultPosition(index);
+      nodeSortKeys.set(node.id, {
+        y: position.y,
+        x: position.x,
+        order: index,
+      });
     });
+    const getNodeSortKey = (nodeId: string) =>
+      nodeSortKeys.get(nodeId) ?? { y: 0, x: 0, order: 0 };
     const edgeOffsets = new Map<string, number>();
     const edgesBySource = new Map<string, { id: string; to: string }[]>();
     canvasDefinition.edgeEntries.forEach((entry) => {
@@ -1267,15 +1289,21 @@ export default function QuestionMapVisualPage() {
         return;
       }
       edges.sort((a, b) => {
-        const order =
-          (nodeOrder.get(a.to) ?? 0) - (nodeOrder.get(b.to) ?? 0);
-        if (order !== 0) {
-          return order;
+        const aKey = getNodeSortKey(a.to);
+        const bKey = getNodeSortKey(b.to);
+        if (aKey.y !== bKey.y) {
+          return aKey.y - bKey.y;
+        }
+        if (aKey.x !== bKey.x) {
+          return aKey.x - bKey.x;
+        }
+        if (aKey.order !== bKey.order) {
+          return aKey.order - bKey.order;
         }
         return a.id.localeCompare(b.id);
       });
       edges.forEach((edge, index) => {
-        const offset = index * 16;
+        const offset = (edges.length - 1 - index) * 16;
         if (offset !== 0) {
           edgeOffsets.set(edge.id, offset);
         }
@@ -1304,6 +1332,7 @@ export default function QuestionMapVisualPage() {
           questionId: entry.questionId,
           scopeLabel: entry.flowLabel,
           showOrder: false,
+          isSelected: false,
           isLocked: true,
           isGhost: true,
           flags: {
@@ -1365,6 +1394,8 @@ export default function QuestionMapVisualPage() {
     orphanQuestionIds,
     questionMap,
     selectedEdgeId,
+    selectedNodeId,
+    selectedQuestionId,
     showEdgeLabels,
     showNodeOrder,
   ]);
@@ -2376,7 +2407,7 @@ export default function QuestionMapVisualPage() {
       });
       outgoingEdgesBySource.set(edge.from, list);
     });
-    const edgeBranchOffsets = new Map<string, number>();
+    const nodeXOffsets = new Map<string, number>();
     outgoingEdgesBySource.forEach((edges) => {
       const conditionalEdges = edges.filter((edge) => edge.isConditional);
       if (conditionalEdges.length < 2) {
@@ -2390,17 +2421,23 @@ export default function QuestionMapVisualPage() {
         }
         return a.id.localeCompare(b.id);
       });
-      const baseOffset = 0.2;
+      const maxOffset = (conditionalEdges.length - 1) * 120;
       conditionalEdges.forEach((edge, index) => {
-        const offset = baseOffset + index * 0.6;
-        edgeBranchOffsets.set(edge.id, offset);
+        const offset = maxOffset - index * 120;
+        if (offset === 0) {
+          return;
+        }
+        const current = nodeXOffsets.get(edge.to) ?? 0;
+        if (Math.abs(offset) > Math.abs(current)) {
+          nodeXOffsets.set(edge.to, offset);
+        }
       });
     });
     const incoming = new Map<string, Set<string>>();
     const outgoing = new Map<string, Set<string>>();
     const incomingEdges = new Map<
       string,
-      { from: string; isConditional: boolean; branchOffset: number }[]
+      { from: string; isConditional: boolean }[]
     >();
     layoutEntries.forEach((entry) => {
       incoming.set(entry.id, new Set());
@@ -2420,7 +2457,6 @@ export default function QuestionMapVisualPage() {
       incomingEdges.get(edge.to)?.push({
         from: edge.from,
         isConditional: Boolean(edge.when?.expression),
-        branchOffset: edgeBranchOffsets.get(edge.id) ?? 0,
       });
     });
 
@@ -2460,10 +2496,9 @@ export default function QuestionMapVisualPage() {
     topoOrder.forEach((nodeId) => {
       const parents = incomingEdges.get(nodeId) ?? [];
       let column = 0;
-      parents.forEach(({ from, isConditional, branchOffset }) => {
+      parents.forEach(({ from, isConditional }) => {
         const parentColumn = columns.get(from) ?? 0;
-        const candidate =
-          parentColumn + (isConditional ? 1 : 0) + branchOffset;
+        const candidate = parentColumn + (isConditional ? 1 : 0);
         column = Math.max(column, candidate);
       });
       columns.set(nodeId, column);
@@ -2480,8 +2515,9 @@ export default function QuestionMapVisualPage() {
     layoutEntries.forEach((entry) => {
       const order = nodeOrder.get(entry.id) ?? 0;
       const column = columns.get(entry.id) ?? 0;
+      const offset = nodeXOffsets.get(entry.id) ?? 0;
       nextPositions.set(entry.id, {
-        x: marginX + column * columnSpacing,
+        x: marginX + column * columnSpacing + offset,
         y: marginY + order * rowSpacing,
       });
     });
@@ -2667,6 +2703,10 @@ export default function QuestionMapVisualPage() {
         setSelectedNodeId(selectedNode.id);
         setSelectedQuestionId(meta?.questionId ?? null);
         setSelectedEdgeId(null);
+        if (isCanvasExpanded && showPreview) {
+          setShowPreview(false);
+          setAutoHiddenPreview(true);
+        }
         return;
       }
       if (selectedEdge) {
@@ -2682,11 +2722,13 @@ export default function QuestionMapVisualPage() {
         setSelectedQuestionId(null);
         return;
       }
-      setSelectedNodeId(null);
-      setSelectedQuestionId(null);
-      setSelectedEdgeId(null);
     },
-    [canvasDefinition.edgeMetaById, canvasDefinition.nodeMetaById]
+    [
+      canvasDefinition.edgeMetaById,
+      canvasDefinition.nodeMetaById,
+      isCanvasExpanded,
+      showPreview,
+    ]
   );
 
   const handleNodeClick = useCallback(
@@ -2698,8 +2740,13 @@ export default function QuestionMapVisualPage() {
       setSelectedNodeId(node.id);
       setSelectedQuestionId(meta.questionId);
       setSelectedEdgeId(null);
+      setShowInspector(true);
+      if (isCanvasExpanded && showPreview) {
+        setShowPreview(false);
+        setAutoHiddenPreview(true);
+      }
     },
-    [canvasDefinition.nodeMetaById]
+    [canvasDefinition.nodeMetaById, isCanvasExpanded, showPreview]
   );
 
   const handleEdgeClick = useCallback(
@@ -2719,6 +2766,15 @@ export default function QuestionMapVisualPage() {
     setSelectedNodeId(null);
     setSelectedQuestionId(null);
     setSelectedEdgeId(null);
+    if (autoHiddenPreview) {
+      setShowPreview(true);
+      setAutoHiddenPreview(false);
+    }
+  }, [autoHiddenPreview]);
+
+  const handleTogglePreview = useCallback(() => {
+    setShowPreview((prev) => !prev);
+    setAutoHiddenPreview(false);
   }, []);
 
   const handleSelectQuestion = useCallback(
@@ -2915,6 +2971,491 @@ export default function QuestionMapVisualPage() {
     setSelectedQuestionId(null);
     setEdgeDraft({ from: "", to: "", expression: "" });
   };
+
+  const renderInspectorPanel = () => (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+      <div className="space-y-4">
+        {selectedQuestion ? (
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                Geselecteerde vraag
+              </p>
+              <p className="text-sm text-slate-600">
+                {selectedQuestion.prompt}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {selectedQuestion.id}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setDetailsTab("question")}
+                aria-pressed={detailsTab === "question"}
+                className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                  detailsTab === "question"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                Vraag
+              </button>
+              <button
+                type="button"
+                onClick={() => setDetailsTab("options")}
+                aria-pressed={detailsTab === "options"}
+                className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                  detailsTab === "options"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                Opties
+              </button>
+              <button
+                type="button"
+                onClick={() => setDetailsTab("outputs")}
+                aria-pressed={detailsTab === "outputs"}
+                className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                  detailsTab === "outputs"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                Outputs
+              </button>
+            </div>
+            {detailsTab === "question" ? (
+              <div className="space-y-4">
+                <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                  Concept key
+                  <input
+                    value={selectedQuestion.conceptKey}
+                    onChange={(event) =>
+                      updateQuestion(selectedQuestion.id, {
+                        conceptKey: event.target.value,
+                      })
+                    }
+                    className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                  Vraagtekst
+                  <textarea
+                    value={selectedQuestion.prompt}
+                    onChange={(event) =>
+                      updateQuestion(selectedQuestion.id, {
+                        prompt: event.target.value,
+                      })
+                    }
+                    rows={3}
+                    className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                  Type
+                  <select
+                    value={selectedQuestion.kind}
+                    onChange={(event) =>
+                      updateQuestion(selectedQuestion.id, {
+                        kind: event.target.value as Question["kind"],
+                      })
+                    }
+                    className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  >
+                    <option value="text">Tekst</option>
+                    <option value="number">Nummer</option>
+                    <option value="boolean">Ja/Nee</option>
+                    <option value="single">Single choice</option>
+                    <option value="multi">Multi choice</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                  Tags
+                  <input
+                    value={joinList(selectedQuestion.tags)}
+                    onChange={(event) =>
+                      updateQuestion(selectedQuestion.id, {
+                        tags: splitList(event.target.value),
+                      })
+                    }
+                    placeholder="bijv. materiaal, compliance"
+                    className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  />
+                </label>
+                {selectedQuestionResolution ? (
+                  <p className="text-xs text-slate-500">
+                    {selectedQuestionResolution.isExcluded
+                      ? `Uitgesloten in ${selectedQuestionResolution.label}.`
+                      : selectedQuestionIsLocked
+                      ? `Actief via ${selectedQuestionResolution.label} (op slot).`
+                      : "Actief in deze scope."}
+                  </p>
+                ) : null}
+                {activeFlow ? (
+                  flowQuestionIds.has(selectedQuestion.id) ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nodeId = activeFlow.nodes.find(
+                          (node) => node.questionId === selectedQuestion.id
+                        )?.id;
+                        if (nodeId) {
+                          removeNodeFromFlow(activeFlow.id, nodeId);
+                        }
+                      }}
+                      className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
+                    >
+                      Verwijder uit flow
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleAddToActiveFlow(selectedQuestion.id)}
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      {selectedQuestionIsLocked
+                        ? "Ontgrendelen voor deze scope"
+                        : "Toevoegen aan flow"}
+                    </button>
+                  )
+                ) : null}
+                {canToggleExclusions ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      toggleExclusionForActiveScope(selectedQuestion.id)
+                    }
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                      excludedQuestionIds.has(selectedQuestion.id)
+                        ? "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    {excludedQuestionIds.has(selectedQuestion.id)
+                      ? "Toon in deze scope"
+                      : "Uitsluiten voor deze scope"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => router.push("/wizard/question-map")}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Open detailbewerking
+                </button>
+              </div>
+            ) : null}
+
+            {detailsTab === "options" ? (
+              <div className="space-y-3">
+                {selectedQuestion.kind === "single" ||
+                selectedQuestion.kind === "multi" ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                        Opties
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => addOption(selectedQuestion)}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                      >
+                        + optie
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {(selectedQuestion.options ?? []).map((option) => (
+                        <div
+                          key={option.id}
+                          className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600"
+                        >
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+                              Label
+                              <input
+                                value={option.label}
+                                onChange={(event) =>
+                                  updateOption(selectedQuestion, option.id, {
+                                    label: event.target.value,
+                                  })
+                                }
+                                className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
+                              Value
+                              <input
+                                value={option.value}
+                                onChange={(event) =>
+                                  updateOption(selectedQuestion, option.id, {
+                                    value: event.target.value,
+                                  })
+                                }
+                                className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                              />
+                            </label>
+                          </div>
+                          <details className="mt-3">
+                            <summary className="cursor-pointer text-xs font-semibold text-slate-500">
+                              Outputs voor optie
+                            </summary>
+                            <div className="mt-3">
+                              <OutputEditor
+                                outputs={option.outputs ?? []}
+                                onChange={(next) =>
+                                  updateOptionOutputs(
+                                    selectedQuestion,
+                                    option.id,
+                                    next
+                                  )
+                                }
+                              />
+                            </div>
+                          </details>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              removeOption(selectedQuestion, option.id)
+                            }
+                            className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
+                          >
+                            Optie verwijderen
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    Deze vraag heeft geen opties. Kies type Single choice of
+                    Multi choice.
+                  </p>
+                )}
+              </div>
+            ) : null}
+
+            {detailsTab === "outputs" ? (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Outputs (planning)
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Outputs sturen de takenlijst in de planning.
+                </p>
+                <OutputEditor
+                  outputs={selectedQuestion.outputs ?? []}
+                  onChange={(next) => updateOutputs(selectedQuestion, next)}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : selectedEdge && activeFlow ? (
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                Geselecteerde relatie
+              </p>
+              <p className="text-sm text-slate-500">Flow: {activeFlow.name}</p>
+            </div>
+            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+              Van vraag
+              <select
+                value={selectedEdge.from}
+                onChange={(event) =>
+                  updateEdge(activeFlow.id, selectedEdge.id, {
+                    from: event.target.value,
+                  })
+                }
+                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              >
+                {activeFlow.nodes.map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {questionMap.get(node.questionId)?.prompt ?? node.questionId}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+              Naar vraag
+              <select
+                value={selectedEdge.to}
+                onChange={(event) =>
+                  updateEdge(activeFlow.id, selectedEdge.id, {
+                    to: event.target.value,
+                  })
+                }
+                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              >
+                {activeFlow.nodes.map((node) => (
+                  <option key={node.id} value={node.id}>
+                    {questionMap.get(node.questionId)?.prompt ?? node.questionId}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+              Voorwaarde
+              <input
+                value={selectedEdge.when?.expression ?? ""}
+                onChange={(event) =>
+                  updateEdge(activeFlow.id, selectedEdge.id, {
+                    when: event.target.value.trim()
+                      ? { expression: event.target.value }
+                      : undefined,
+                  })
+                }
+                placeholder="bijv. en1090.required == true"
+                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => removeEdge(activeFlow.id, selectedEdge.id)}
+              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
+            >
+              Relatie verwijderen
+            </button>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">
+            Klik op een vraag of relatie om details te bewerken. Sleep vragen om
+            te verplaatsen.
+          </p>
+        )}
+
+        {activeFlow ? (
+          <div className="border-t border-slate-200 pt-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+              Relatie maken
+            </p>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Relatie bepaalt volgorde: na het beantwoorden van de
+              &quot;van vraag&quot; wordt de &quot;naar vraag&quot; zichtbaar. Laat
+              voorwaarde leeg om altijd door te gaan. Je kan ook verbinden door
+              het punt van een vraag te slepen. Tip: klik twee vragen om
+              &quot;van&quot; en &quot;naar&quot; te vullen.
+            </p>
+            {activeFlow.nodes.length < 2 ? (
+              <p className="mt-2 text-sm text-slate-500">
+                Voeg minimaal twee vragen toe om een relatie te maken.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {selectedNodeId ? (
+                  <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
+                      Geselecteerd: {selectedNodeLabel}
+                    </span>
+                    {selectedNodeIsLocked ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                        Op slot: ontgrendel om relaties te maken.
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEdgeDraft((prev) => ({
+                          ...prev,
+                          from: selectedNodeId,
+                        }))
+                      }
+                      disabled={selectedNodeIsLocked}
+                      className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Gebruik als start
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEdgeDraft((prev) => ({
+                          ...prev,
+                          to: selectedNodeId,
+                        }))
+                      }
+                      disabled={selectedNodeIsLocked}
+                      className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Gebruik als eind
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500">
+                    Klik een vraag om snel van/naar te vullen.
+                  </p>
+                )}
+                <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                  Van vraag
+                  <select
+                    value={edgeDraft.from}
+                    onChange={(event) =>
+                      setEdgeDraft((prev) => ({
+                        ...prev,
+                        from: event.target.value,
+                      }))
+                    }
+                    className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  >
+                    <option value="">{edgeFromLabel}</option>
+                    {activeFlow.nodes.map((node) => (
+                      <option key={node.id} value={node.id}>
+                        {questionMap.get(node.questionId)?.prompt ??
+                          node.questionId}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                  Naar vraag
+                  <select
+                    value={edgeDraft.to}
+                    onChange={(event) =>
+                      setEdgeDraft((prev) => ({
+                        ...prev,
+                        to: event.target.value,
+                      }))
+                    }
+                    className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  >
+                    <option value="">{edgeToLabel}</option>
+                    {activeFlow.nodes.map((node) => (
+                      <option key={node.id} value={node.id}>
+                        {questionMap.get(node.questionId)?.prompt ??
+                          node.questionId}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
+                  Voorwaarde
+                  <input
+                    value={edgeDraft.expression}
+                    onChange={(event) =>
+                      setEdgeDraft((prev) => ({
+                        ...prev,
+                        expression: event.target.value,
+                      }))
+                    }
+                    placeholder="bijv. en1090.required == true"
+                    className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={handleCreateEdgeFromDraft}
+                  disabled={!canCreateEdge}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Relatie toevoegen
+                </button>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -3173,7 +3714,9 @@ export default function QuestionMapVisualPage() {
                           ? "Alleen deze scope"
                           : "Toon basis + scope"}
                       </button>
-                      {showCombinedFlow && hasCanvasGlobalFlow ? (
+                      {showCombinedFlow &&
+                      hasCanvasGlobalFlow &&
+                      hasGlobalGhostCandidates ? (
                         <button
                           type="button"
                           onClick={() => setShowGlobalGhosts((prev) => !prev)}
@@ -3435,7 +3978,7 @@ export default function QuestionMapVisualPage() {
                           {isCanvasExpanded ? (
                             <button
                               type="button"
-                              onClick={() => setShowPreview((prev) => !prev)}
+                              onClick={handleTogglePreview}
                               className={`hidden rounded-full border px-3 py-1 text-[11px] font-semibold transition lg:inline-flex ${
                                 showPreview
                                   ? "border-slate-900 bg-slate-900 text-white"
@@ -3444,6 +3987,20 @@ export default function QuestionMapVisualPage() {
                               title="Preview stap 3"
                             >
                               {showPreview ? "Preview sluiten" : "Preview"}
+                            </button>
+                          ) : null}
+                          {isCanvasExpanded ? (
+                            <button
+                              type="button"
+                              onClick={() => setShowInspector((prev) => !prev)}
+                              className={`hidden rounded-full border px-3 py-1 text-[11px] font-semibold transition lg:inline-flex ${
+                                showInspector
+                                  ? "border-slate-900 bg-slate-900 text-white"
+                                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                              }`}
+                              title="Inspector"
+                            >
+                              {showInspector ? "Inspector sluiten" : "Inspector"}
                             </button>
                           ) : null}
                           <button
@@ -3472,12 +4029,63 @@ export default function QuestionMapVisualPage() {
                       <div
                         className={`relative ${
                           isCanvasExpanded
-                            ? "h-[calc(100vh-200px)]"
+                            ? "h-[calc(100vh-280px)]"
                             : "h-[560px]"
                         }`}
                       >
+                        <div
+                          className={`h-full ${
+                            isCanvasExpanded && (showPreview || showInspector)
+                              ? "pr-[22rem]"
+                              : ""
+                          } ${
+                            isCanvasExpanded && showLibraryOverlay
+                              ? "pl-[19rem]"
+                              : ""
+                          }`}
+                        >
+                          <ReactFlow
+                            nodes={nodes}
+                            edges={edges}
+                            nodeTypes={nodeTypes}
+                            onNodesChange={handleNodesChange}
+                            onEdgesChange={handleEdgesChange}
+                            onConnect={handleConnect}
+                            onSelectionChange={handleSelectionChange}
+                            onNodeClick={handleNodeClick}
+                            onEdgeClick={handleEdgeClick}
+                            onNodeDragStop={handleNodeDragStop}
+                            onInit={handleFlowInit}
+                            onPaneClick={handlePaneClick}
+                            nodesConnectable
+                            nodesDraggable
+                            elementsSelectable
+                            panOnDrag
+                            zoomOnScroll
+                            zoomOnPinch
+                            selectionOnDrag={false}
+                            fitView
+                            fitViewOptions={fitViewOptions}
+                            deleteKeyCode={["Backspace", "Delete"]}
+                            className="h-full w-full"
+                          >
+                            <Background gap={24} size={1} color="#e2e8f0" />
+                            <MiniMap
+                              nodeColor={(node) =>
+                                node.selected || node.data?.isSelected
+                                  ? "#0f172a"
+                                  : "#cbd5e1"
+                              }
+                              maskColor="rgba(226,232,240,0.6)"
+                            />
+                            <Controls
+                              position="bottom-left"
+                              showInteractive={false}
+                            />
+                          </ReactFlow>
+                        </div>
                         {isCanvasExpanded ? (
-                          <div className="pointer-events-none absolute right-4 top-4 bottom-4 z-20 flex w-80 flex-col gap-3">
+                          <div className="pointer-events-none absolute right-4 top-4 bottom-4 z-20 flex w-80 min-h-0 flex-col gap-3">
                             <div className="pointer-events-auto w-full rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur">
                               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
                                 Scope selectie
@@ -3582,8 +4190,18 @@ export default function QuestionMapVisualPage() {
                               </p>
                             </div>
                             {showPreview ? (
-                              <div className="pointer-events-auto flex min-h-0 flex-1 flex-col">
+                              <div className="pointer-events-auto">
                                 {previewPanel}
+                              </div>
+                            ) : null}
+                            {showInspector ? (
+                              <div className="pointer-events-auto flex min-h-0 flex-1 flex-col gap-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                  Inspector
+                                </p>
+                                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                                  {renderInspectorPanel()}
+                                </div>
                               </div>
                             ) : null}
                           </div>
@@ -3621,46 +4239,12 @@ export default function QuestionMapVisualPage() {
                                   <span className="whitespace-nowrap">Nieuwe vraag</span>
                                 </button>
                               </div>
-                              <div className="flex-1 space-y-2 overflow-y-auto pr-1">
-                                {libraryItems}
-                              </div>
+                            <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+                              {libraryItems}
                             </div>
                           </div>
-                        ) : null}
-                        <ReactFlow
-                          nodes={nodes}
-                          edges={edges}
-                          nodeTypes={nodeTypes}
-                          onNodesChange={handleNodesChange}
-                          onEdgesChange={handleEdgesChange}
-                          onConnect={handleConnect}
-                          onSelectionChange={handleSelectionChange}
-                          onNodeClick={handleNodeClick}
-                          onEdgeClick={handleEdgeClick}
-                          onNodeDragStop={handleNodeDragStop}
-                          onInit={handleFlowInit}
-                          onPaneClick={handlePaneClick}
-                          nodesConnectable
-                          nodesDraggable
-                          elementsSelectable
-                          panOnDrag
-                          zoomOnScroll
-                          zoomOnPinch
-                          selectionOnDrag={false}
-                          fitView
-                          fitViewOptions={fitViewOptions}
-                          deleteKeyCode={["Backspace", "Delete"]}
-                          className="h-full w-full"
-                        >
-                          <Background gap={24} size={1} color="#e2e8f0" />
-                          <MiniMap
-                            nodeColor={(node) =>
-                              node.selected ? "#0f172a" : "#cbd5e1"
-                            }
-                            maskColor="rgba(226,232,240,0.6)"
-                          />
-                          <Controls position="bottom-left" showInteractive={false} />
-                        </ReactFlow>
+                        </div>
+                      ) : null}
                         {hasActiveFlow && !hasFlowNodes && !hasCanvasNodes ? (
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
                             <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-dashed border-slate-200 bg-white/90 px-5 py-4 text-center text-sm text-slate-600 shadow-sm">
@@ -3711,7 +4295,7 @@ export default function QuestionMapVisualPage() {
                   </h2>
                   <button
                     type="button"
-                    onClick={() => setShowPreview((prev) => !prev)}
+                    onClick={handleTogglePreview}
                     className="text-[10px] font-semibold text-slate-500"
                   >
                     {showPreview ? "verberg" : "toon"}
@@ -3721,532 +4305,7 @@ export default function QuestionMapVisualPage() {
                 <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Inspector
                 </h2>
-                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                  <div className="space-y-4">
-                    {selectedQuestion ? (
-                      <div className="space-y-4">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                            Geselecteerde vraag
-                          </p>
-                          <p className="text-sm text-slate-600">
-                            {selectedQuestion.prompt}
-                          </p>
-                          <p className="text-[11px] text-slate-400">
-                            {selectedQuestion.id}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setDetailsTab("question")}
-                            aria-pressed={detailsTab === "question"}
-                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
-                              detailsTab === "question"
-                                ? "border-slate-900 bg-slate-900 text-white"
-                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                            }`}
-                          >
-                            Vraag
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDetailsTab("options")}
-                            aria-pressed={detailsTab === "options"}
-                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
-                              detailsTab === "options"
-                                ? "border-slate-900 bg-slate-900 text-white"
-                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                            }`}
-                          >
-                            Opties
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDetailsTab("outputs")}
-                            aria-pressed={detailsTab === "outputs"}
-                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
-                              detailsTab === "outputs"
-                                ? "border-slate-900 bg-slate-900 text-white"
-                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                            }`}
-                          >
-                            Outputs
-                          </button>
-                        </div>
-                        {detailsTab === "question" ? (
-                          <div className="space-y-4">
-                            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                              Concept key
-                              <input
-                                value={selectedQuestion.conceptKey}
-                                onChange={(event) =>
-                                  updateQuestion(selectedQuestion.id, {
-                                    conceptKey: event.target.value,
-                                  })
-                                }
-                                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                              Vraagtekst
-                              <textarea
-                                value={selectedQuestion.prompt}
-                                onChange={(event) =>
-                                  updateQuestion(selectedQuestion.id, {
-                                    prompt: event.target.value,
-                                  })
-                                }
-                                rows={3}
-                                className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                              Type
-                              <select
-                                value={selectedQuestion.kind}
-                                onChange={(event) =>
-                                  updateQuestion(selectedQuestion.id, {
-                                    kind: event.target.value as Question["kind"],
-                                  })
-                                }
-                                className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                              >
-                                <option value="text">Tekst</option>
-                                <option value="number">Nummer</option>
-                                <option value="boolean">Ja/Nee</option>
-                                <option value="single">Single choice</option>
-                                <option value="multi">Multi choice</option>
-                              </select>
-                            </label>
-                          <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                            Tags
-                            <input
-                              value={joinList(selectedQuestion.tags)}
-                              onChange={(event) =>
-                                updateQuestion(selectedQuestion.id, {
-                                  tags: splitList(event.target.value),
-                                })
-                              }
-                              placeholder="bijv. materiaal, compliance"
-                              className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                            />
-                          </label>
-                          {selectedQuestionResolution ? (
-                            <p className="text-xs text-slate-500">
-                              {selectedQuestionResolution.isExcluded
-                                ? `Uitgesloten in ${selectedQuestionResolution.label}.`
-                                : selectedQuestionIsLocked
-                                ? `Actief via ${selectedQuestionResolution.label} (op slot).`
-                                : "Actief in deze scope."}
-                            </p>
-                          ) : null}
-                          {activeFlow ? (
-                            flowQuestionIds.has(selectedQuestion.id) ? (
-                              <button
-                                  type="button"
-                                  onClick={() => {
-                                    const nodeId = activeFlow.nodes.find(
-                                      (node) =>
-                                        node.questionId === selectedQuestion.id
-                                    )?.id;
-                                    if (nodeId) {
-                                      removeNodeFromFlow(activeFlow.id, nodeId);
-                                    }
-                                  }}
-                                  className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
-                                >
-                                  Verwijder uit flow
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleAddToActiveFlow(selectedQuestion.id)
-                                  }
-                                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
-                                >
-                                  {selectedQuestionIsLocked
-                                    ? "Ontgrendelen voor deze scope"
-                                    : "Toevoegen aan flow"}
-                                </button>
-                              )
-                            ) : null}
-                            {canToggleExclusions ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  toggleExclusionForActiveScope(
-                                    selectedQuestion.id
-                                  )
-                                }
-                                className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                                  excludedQuestionIds.has(selectedQuestion.id)
-                                    ? "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100"
-                                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                                }`}
-                              >
-                                {excludedQuestionIds.has(selectedQuestion.id)
-                                  ? "Toon in deze scope"
-                                  : "Uitsluiten voor deze scope"}
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              onClick={() => router.push("/wizard/question-map")}
-                              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
-                            >
-                              Open detailbewerking
-                            </button>
-                          </div>
-                        ) : null}
-
-                        {detailsTab === "options" ? (
-                          <div className="space-y-3">
-                            {selectedQuestion.kind === "single" ||
-                            selectedQuestion.kind === "multi" ? (
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                                    Opties
-                                  </p>
-                                  <button
-                                    type="button"
-                                    onClick={() => addOption(selectedQuestion)}
-                                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
-                                  >
-                                    + optie
-                                  </button>
-                                </div>
-                                <div className="space-y-3">
-                                  {(selectedQuestion.options ?? []).map(
-                                    (option) => (
-                                      <div
-                                        key={option.id}
-                                        className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600"
-                                      >
-                                        <div className="grid gap-2 sm:grid-cols-2">
-                                          <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
-                                            Label
-                                            <input
-                                              value={option.label}
-                                              onChange={(event) =>
-                                                updateOption(
-                                                  selectedQuestion,
-                                                  option.id,
-                                                  {
-                                                    label: event.target.value,
-                                                  }
-                                                )
-                                              }
-                                              className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                                            />
-                                          </label>
-                                          <label className="flex flex-col gap-2 text-xs font-semibold text-slate-500">
-                                            Value
-                                            <input
-                                              value={option.value}
-                                              onChange={(event) =>
-                                                updateOption(
-                                                  selectedQuestion,
-                                                  option.id,
-                                                  {
-                                                    value: event.target.value,
-                                                  }
-                                                )
-                                              }
-                                              className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                                            />
-                                          </label>
-                                        </div>
-                                        <details className="mt-3">
-                                          <summary className="cursor-pointer text-xs font-semibold text-slate-500">
-                                            Outputs voor optie
-                                          </summary>
-                                          <div className="mt-3">
-                                            <OutputEditor
-                                              outputs={option.outputs ?? []}
-                                              onChange={(next) =>
-                                                updateOptionOutputs(
-                                                  selectedQuestion,
-                                                  option.id,
-                                                  next
-                                                )
-                                              }
-                                            />
-                                          </div>
-                                        </details>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            removeOption(
-                                              selectedQuestion,
-                                              option.id
-                                            )
-                                          }
-                                          className="mt-3 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
-                                        >
-                                          Optie verwijderen
-                                        </button>
-                                      </div>
-                                    )
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <p className="text-sm text-slate-500">
-                                Deze vraag heeft geen opties. Kies type Single
-                                choice of Multi choice.
-                              </p>
-                            )}
-                          </div>
-                        ) : null}
-
-                        {detailsTab === "outputs" ? (
-                          <div className="space-y-2">
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                              Outputs (planning)
-                            </p>
-                            <p className="text-[11px] text-slate-400">
-                              Outputs sturen de takenlijst in de planning.
-                            </p>
-                            <OutputEditor
-                              outputs={selectedQuestion.outputs ?? []}
-                              onChange={(next) =>
-                                updateOutputs(selectedQuestion, next)
-                              }
-                            />
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : selectedEdge && activeFlow ? (
-                      <div className="space-y-4">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                            Geselecteerde relatie
-                          </p>
-                          <p className="text-sm text-slate-500">
-                            Flow: {activeFlow.name}
-                          </p>
-                        </div>
-                        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                          Van vraag
-                          <select
-                            value={selectedEdge.from}
-                            onChange={(event) =>
-                              updateEdge(activeFlow.id, selectedEdge.id, {
-                                from: event.target.value,
-                              })
-                            }
-                            className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                          >
-                            {activeFlow.nodes.map((node) => (
-                              <option key={node.id} value={node.id}>
-                                {questionMap.get(node.questionId)?.prompt ??
-                                  node.questionId}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                          Naar vraag
-                          <select
-                            value={selectedEdge.to}
-                            onChange={(event) =>
-                              updateEdge(activeFlow.id, selectedEdge.id, {
-                                to: event.target.value,
-                              })
-                            }
-                            className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                          >
-                            {activeFlow.nodes.map((node) => (
-                              <option key={node.id} value={node.id}>
-                                {questionMap.get(node.questionId)?.prompt ??
-                                  node.questionId}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="flex flex-col gap-2 text-sm font-semibold text-slate-700">
-                          Voorwaarde
-                          <input
-                            value={selectedEdge.when?.expression ?? ""}
-                            onChange={(event) =>
-                              updateEdge(activeFlow.id, selectedEdge.id, {
-                                when: event.target.value.trim()
-                                  ? { expression: event.target.value }
-                                  : undefined,
-                              })
-                            }
-                            placeholder="bijv. en1090.required == true"
-                            className="h-10 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => removeEdge(activeFlow.id, selectedEdge.id)}
-                          className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
-                        >
-                          Relatie verwijderen
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-500">
-                        Klik op een vraag of relatie om details te bewerken. Sleep
-                        vragen om te verplaatsen.
-                      </p>
-                    )}
-
-                    {activeFlow ? (
-                      <div className="border-t border-slate-200 pt-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                          Relatie maken
-                        </p>
-                        <p className="mt-2 text-[11px] text-slate-500">
-                          Relatie bepaalt volgorde: na het beantwoorden van de
-                          &quot;van vraag&quot; wordt de &quot;naar vraag&quot; zichtbaar. Laat
-                          voorwaarde leeg om altijd door te gaan. Je kan ook
-                          verbinden door het punt van een vraag te slepen. Tip:
-                          klik twee vragen om &quot;van&quot; en &quot;naar&quot; te vullen.
-                        </p>
-                        {activeFlow.nodes.length < 2 ? (
-                          <p className="mt-2 text-sm text-slate-500">
-                            Voeg minimaal twee vragen toe om een relatie te maken.
-                          </p>
-                        ) : (
-                          <div className="mt-3 space-y-3">
-                            {selectedNodeId ? (
-                              <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
-                                <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
-                                  Geselecteerd: {selectedNodeLabel}
-                                </span>
-                                {selectedNodeIsLocked ? (
-                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
-                                    Op slot: ontgrendel om relaties te maken.
-                                  </span>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setEdgeDraft((prev) => ({
-                                      ...prev,
-                                      from: selectedNodeId,
-                                    }))
-                                  }
-                                  disabled={selectedNodeIsLocked}
-                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                  Gebruik als start
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setEdgeDraft((prev) => ({
-                                      ...prev,
-                                      to: selectedNodeId,
-                                    }))
-                                  }
-                                  disabled={selectedNodeIsLocked}
-                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                  Gebruik als doel
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setEdgeDraft({
-                                      from: "",
-                                      to: "",
-                                      expression: "",
-                                    })
-                                  }
-                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50"
-                                >
-                                  Wis selectie
-                                </button>
-                              </div>
-                            ) : null}
-                            <div className="grid gap-2">
-                              <label className="text-xs font-semibold text-slate-500">
-                                Als deze vraag beantwoord is
-                                <select
-                                  value={edgeDraft.from}
-                                  onChange={(event) =>
-                                    setEdgeDraft((prev) => ({
-                                      ...prev,
-                                      from: event.target.value,
-                                    }))
-                                  }
-                                  className="mt-1 h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                                >
-                                  <option value="">Kies een vraag</option>
-                                  {activeFlow.nodes.map((node) => (
-                                    <option key={node.id} value={node.id}>
-                                      {questionMap.get(node.questionId)?.prompt ??
-                                        node.questionId}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label className="text-xs font-semibold text-slate-500">
-                                Toon dan deze vraag
-                                <select
-                                  value={edgeDraft.to}
-                                  onChange={(event) =>
-                                    setEdgeDraft((prev) => ({
-                                      ...prev,
-                                      to: event.target.value,
-                                    }))
-                                  }
-                                  className="mt-1 h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                                >
-                                  <option value="">Kies een vraag</option>
-                                  {activeFlow.nodes.map((node) => (
-                                    <option key={node.id} value={node.id}>
-                                      {questionMap.get(node.questionId)?.prompt ??
-                                        node.questionId}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            </div>
-                            <label className="text-xs font-semibold text-slate-500">
-                              Voorwaarde (optioneel)
-                              <input
-                                value={edgeDraft.expression}
-                                onChange={(event) =>
-                                  setEdgeDraft((prev) => ({
-                                    ...prev,
-                                    expression: event.target.value,
-                                  }))
-                                }
-                                placeholder="bijv. en1090.required == true"
-                                className="mt-1 h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-700 shadow-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-                              />
-                            </label>
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-                              <p className="font-semibold text-slate-500">
-                                Voorbeeld
-                              </p>
-                              <p>
-                                Als {edgeFromLabel}, toon {edgeToLabel}.
-                                Voorwaarde: {edgeConditionLabel}.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={handleCreateEdgeFromDraft}
-                              disabled={!canCreateEdge}
-                              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              Relatie toevoegen
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
+                {renderInspectorPanel()}
               </div>
             </div>
           </div>
